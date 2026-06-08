@@ -43,9 +43,14 @@ Three-layer composition (mirrors go-okx):
   Market-data REST (GetContracts/GetContract→SymbolInfo w/ quanto_multiplier, GetOrderBook[with_id],
   GetCandlesticks, GetTickers) + types (PositionInfo/SymbolInfo/OrderBook/Candle/Ticker). Account/Market
   wired into futures.Client. Contract tests green; build/vet/gofmt clean.
-- 🔧 **M4** — WebSocket (`internal/ws` + `internal/gatemet` metrics): market-data (book_ticker/tickers/trades)
-  + user-data (orders/positions via login). v1.0 scope = BBO + REST snapshot (no incremental book engine).
-- 📋 **M5** — GoDoc, README, example, finalize handoff.
+- ✅ **M4** — WebSocket. `internal/ws` (Gate `{time,channel,event,payload,auth}` protocol, per-subscribe
+  HMAC-SHA512 auth, reconnect+backoff+jitter, multi-handler-per-key dispatch, app-level ping). Signer.SignWS
+  + codec.UnmarshalCaseSensitive (for book_ticker b/B,a/A). futures/stream.go: WatchBookTicker(BBO),
+  WatchTickers/WatchMarkPrice, WatchTrades (public); WatchOrders, WatchPositions (private; lazy user_id via
+  GET .../accounts). types BookTicker/PublicTrade. Stream() wired in. WS integration tests (gorilla httptest)
+  + -race clean. NOTE: no `internal/gatemet` — ws uses logger only (metrics deferred). Conn lifetime = first
+  Watch ctx (mirrors okx); per-Watch cancel not supported.
+- 🔧 **M5** — GoDoc polish, README, runnable example, finalize handoff; optional sign calibration vs testnet.
 - 📋 **core integration** (separate branch `gate-connector` off `qa`): `gate_futures` connector
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration). Agree plan first.
 

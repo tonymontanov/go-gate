@@ -133,6 +133,25 @@ func (s *Signer) Timestamp(now time.Time) string {
 	return strconv.FormatInt(now.Unix(), 10)
 }
 
+/*
+SignWS returns the signature for a Gate WebSocket channel subscription:
+
+	SIGN = hex(HMAC_SHA512(secret, "channel=<channel>&event=<event>&time=<ts>"))
+
+ts is Unix seconds. The result goes into the subscribe message's auth object
+({method:"api_key", KEY, SIGN}). Returns ErrSignerDisabled if the signer is
+disabled.
+*/
+func (s *Signer) SignWS(channel, event string, ts int64) (string, error) {
+	if !s.Enabled() {
+		return "", ErrSignerDisabled
+	}
+	var msg string = "channel=" + channel + "&event=" + event + "&time=" + strconv.FormatInt(ts, 10)
+	var mac = hmac.New(sha512.New, s.secretKey)
+	mac.Write([]byte(msg))
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
 // String returns a log-safe representation of the Signer — without secrets.
 func (s *Signer) String() string {
 	if s == nil || !s.enabled {

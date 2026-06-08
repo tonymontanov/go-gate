@@ -309,22 +309,27 @@ func (m *MarketDataClient) GetTickers(ctx context.Context, contract string) ([]t
 	var out []types.Ticker = make([]types.Ticker, 0, len(payloads))
 	var i int
 	for i = 0; i < len(payloads); i++ {
-		out = append(out, types.Ticker{
-			Contract:              payloads[i].Contract,
-			Last:                  mustDecimal(payloads[i].Last),
-			MarkPrice:             mustDecimal(payloads[i].MarkPrice),
-			IndexPrice:            mustDecimal(payloads[i].IndexPrice),
-			HighestBid:            mustDecimal(payloads[i].HighestBid),
-			LowestAsk:             mustDecimal(payloads[i].LowestAsk),
-			ChangePercentage:      mustDecimal(payloads[i].ChangePercentage),
-			TotalSize:             mustDecimal(payloads[i].TotalSize),
-			Volume24h:             mustDecimal(payloads[i].Volume24h),
-			FundingRate:           mustDecimal(payloads[i].FundingRate),
-			FundingRateIndicative: mustDecimal(payloads[i].FundingRateIndicative),
-			RateLimits:            rateLimits,
-		})
+		out = append(out, tickerFromPayload(&payloads[i], rateLimits))
 	}
 	return out, nil
+}
+
+// tickerFromPayload maps a Gate ticker payload (REST or WS) into types.Ticker.
+func tickerFromPayload(p *tickerPayload, rateLimits map[string]string) types.Ticker {
+	return types.Ticker{
+		Contract:              p.Contract,
+		Last:                  mustDecimal(p.Last),
+		MarkPrice:             mustDecimal(p.MarkPrice),
+		IndexPrice:            mustDecimal(p.IndexPrice),
+		HighestBid:            mustDecimal(p.HighestBid),
+		LowestAsk:             mustDecimal(p.LowestAsk),
+		ChangePercentage:      mustDecimal(p.ChangePercentage),
+		TotalSize:             mustDecimal(p.TotalSize),
+		Volume24h:             mustDecimal(p.Volume24h),
+		FundingRate:           mustDecimal(p.FundingRate),
+		FundingRateIndicative: mustDecimal(p.FundingRateIndicative),
+		RateLimits:            rateLimits,
+	}
 }
 
 // floatSecondsOrMsToMs normalizes a Gate float timestamp to epoch milliseconds.

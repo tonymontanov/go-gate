@@ -38,6 +38,16 @@ import (
 //   - still ~4x faster than encoding/json for our use case.
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+// jsonCaseSensitive — case-SENSITIVE parser. Required for Gate payloads whose
+// keys differ only by case, e.g. the futures.book_ticker push uses "b"/"B" for
+// bid price/size and "a"/"A" for ask price/size; the default case-insensitive
+// matching would alias them and corrupt the decode.
+var jsonCaseSensitive = jsoniter.Config{
+	EscapeHTML:             true,
+	ValidateJsonRawMessage: true,
+	CaseSensitive:          true,
+}.Froze()
+
 // RawMessage — analogue of json.RawMessage that works correctly with jsoniter.
 // Used to defer parsing of a payload until the concrete destination type is known.
 type RawMessage []byte
@@ -66,6 +76,13 @@ func Marshal(v any) ([]byte, error) {
 // Unmarshal parses JSON into a value.
 func Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
+}
+
+// UnmarshalCaseSensitive parses JSON with case-sensitive key matching. Use it
+// only where keys differ by case (e.g. the futures.book_ticker push); prefer
+// Unmarshal elsewhere for standard-library-compatible behavior.
+func UnmarshalCaseSensitive(data []byte, v any) error {
+	return jsonCaseSensitive.Unmarshal(data, v)
 }
 
 // NewDecoder creates a decoder for streaming parsing of a reader.

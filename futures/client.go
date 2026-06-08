@@ -28,6 +28,7 @@ type Client struct {
 	trading    *TradingClient
 	account    *AccountClient
 	marketData *MarketDataClient
+	stream     *StreamClient
 }
 
 // NewClient creates a Futures client. The parent argument is required.
@@ -42,6 +43,7 @@ func NewClient(parent *gate.Client) *Client {
 	c.trading = newTradingClient(c)
 	c.account = newAccountClient(c)
 	c.marketData = newMarketDataClient(c)
+	c.stream = newStreamClient(c)
 	return c
 }
 
@@ -56,6 +58,9 @@ func (c *Client) Account() *AccountClient { return c.account }
 
 // MarketData returns the market-data sub-client.
 func (c *Client) MarketData() *MarketDataClient { return c.marketData }
+
+// Stream returns the WebSocket subscription sub-client.
+func (c *Client) Stream() *StreamClient { return c.stream }
 
 // Settle returns the settlement currency this section operates on (e.g. "usdt").
 func (c *Client) Settle() string { return c.settle }
