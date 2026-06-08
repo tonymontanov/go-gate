@@ -50,7 +50,12 @@ Three-layer composition (mirrors go-okx):
   GET .../accounts). types BookTicker/PublicTrade. Stream() wired in. WS integration tests (gorilla httptest)
   + -race clean. NOTE: no `internal/gatemet` — ws uses logger only (metrics deferred). Conn lifetime = first
   Watch ctx (mirrors okx); per-Watch cancel not supported.
-- 🔧 **M5** — GoDoc polish, README, runnable example, finalize handoff; optional sign calibration vs testnet.
+- ✅ **M5** — README.md (overview, architecture, quick start, errors), runnable `examples/basic`, GoDoc.
+  Build/vet/gofmt clean; 42 test functions green; `go test -race` clean.
+
+**v1.0 (futures MVP) COMPLETE.** Pending calibration (do when testnet keys available): live signature
+check; native `batch_amend_orders` item shape; `order_book` current/update timestamp unit; private-channel
+push field exactness (orders/positions/trades). All flagged in code comments.
 - 📋 **core integration** (separate branch `gate-connector` off `qa`): `gate_futures` connector
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration). Agree plan first.
 
