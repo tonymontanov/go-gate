@@ -39,8 +39,11 @@ Three-layer composition (mirrors go-okx):
   GetOrder, GetOpenOrders) + signed-size/market/text encoding + ID-mapping + contract & validation tests.
   Build/vet/gofmt clean, tests green. NOTE: native `batch_amend_orders` deferred (size/amount field
   naming needs fixture calibration) — ModifyBatchOrders loops single amends meanwhile.
-- 🔧 **M3** — futures Account/position + Market-data REST (contracts→SymbolInfo, order_book, candlesticks, tickers).
-- 📋 **M4** — WebSocket (`internal/ws` + `internal/gatemet` metrics): market-data (book_ticker/tickers/trades)
+- ✅ **M3** — futures Account (GetPositions/GetPosition/SetLeverage/SetPositionMode/ClosePosition) +
+  Market-data REST (GetContracts/GetContract→SymbolInfo w/ quanto_multiplier, GetOrderBook[with_id],
+  GetCandlesticks, GetTickers) + types (PositionInfo/SymbolInfo/OrderBook/Candle/Ticker). Account/Market
+  wired into futures.Client. Contract tests green; build/vet/gofmt clean.
+- 🔧 **M4** — WebSocket (`internal/ws` + `internal/gatemet` metrics): market-data (book_ticker/tickers/trades)
   + user-data (orders/positions via login). v1.0 scope = BBO + REST snapshot (no incremental book engine).
 - 📋 **M5** — GoDoc, README, example, finalize handoff.
 - 📋 **core integration** (separate branch `gate-connector` off `qa`): `gate_futures` connector

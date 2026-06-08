@@ -25,7 +25,9 @@ type Client struct {
 	parent *gate.Client
 	settle string
 
-	trading *TradingClient
+	trading    *TradingClient
+	account    *AccountClient
+	marketData *MarketDataClient
 }
 
 // NewClient creates a Futures client. The parent argument is required.
@@ -38,6 +40,8 @@ func NewClient(parent *gate.Client) *Client {
 		settle: parent.Config().Settle,
 	}
 	c.trading = newTradingClient(c)
+	c.account = newAccountClient(c)
+	c.marketData = newMarketDataClient(c)
 	return c
 }
 
@@ -46,6 +50,12 @@ func (c *Client) Parent() *gate.Client { return c.parent }
 
 // Trading returns the trading sub-client.
 func (c *Client) Trading() *TradingClient { return c.trading }
+
+// Account returns the account/position sub-client.
+func (c *Client) Account() *AccountClient { return c.account }
+
+// MarketData returns the market-data sub-client.
+func (c *Client) MarketData() *MarketDataClient { return c.marketData }
 
 // Settle returns the settlement currency this section operates on (e.g. "usdt").
 func (c *Client) Settle() string { return c.settle }
