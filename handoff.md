@@ -32,9 +32,14 @@ Three-layer composition (mirrors go-okx):
 ## Roadmap
 - ✅ **M1** — module + internal scaffolding (auth/rest/codec/gateerr/gatelog) + root package
   (client/config/errors/logger/rate-limit-event). Build/vet/gofmt clean; unit + transport tests green.
-- 🔧 **M2** — `futures/` section: `Client` + factory, `TradingClient` (Create/Amend/Cancel/CancelAll/
-  Batch/CancelForgotten/GetOpenOrders/GetOrder) + body builders + contract tests.
-- 📋 **M3** — futures Account/position + Market-data REST (contracts→SymbolInfo, order_book, candlesticks, tickers).
+- ✅ **M2** — `futures/` section: `Client` + factory (`gate_futures` terminology), `types/`
+  (CreateOrderRequest/ModifyOrderRequest/CancelOrderRequest/OrderInfo/enums), `TradingClient`
+  (CreateOrder, CreateBatchOrders, ModifyOrder, ModifyBatchOrders [seq], CancelOrder, CancelBatchOrders
+  [native], CancelAllOrders [native DELETE ?contract=], CancelForgottenOrders, CountdownCancelAll,
+  GetOrder, GetOpenOrders) + signed-size/market/text encoding + ID-mapping + contract & validation tests.
+  Build/vet/gofmt clean, tests green. NOTE: native `batch_amend_orders` deferred (size/amount field
+  naming needs fixture calibration) — ModifyBatchOrders loops single amends meanwhile.
+- 🔧 **M3** — futures Account/position + Market-data REST (contracts→SymbolInfo, order_book, candlesticks, tickers).
 - 📋 **M4** — WebSocket (`internal/ws` + `internal/gatemet` metrics): market-data (book_ticker/tickers/trades)
   + user-data (orders/positions via login). v1.0 scope = BBO + REST snapshot (no incremental book engine).
 - 📋 **M5** — GoDoc, README, example, finalize handoff.
