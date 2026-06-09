@@ -28,25 +28,50 @@ import (
 
 // spotOrderPayload — Gate spot Order wire shape (the fields the SDK consumes).
 type spotOrderPayload struct {
-	ID           string  `json:"id"`
-	Text         string  `json:"text"`
-	CurrencyPair string  `json:"currency_pair"`
-	Type         string  `json:"type"`
-	Account      string  `json:"account"`
-	Side         string  `json:"side"`
-	Amount       string  `json:"amount"`
-	Price        string  `json:"price"`
-	TimeInForce  string  `json:"time_in_force"`
-	Left         string  `json:"left"`
-	FilledTotal  string  `json:"filled_total"`
-	AvgDealPrice string  `json:"avg_deal_price"`
-	FillPrice    string  `json:"fill_price"`
-	Status       string  `json:"status"`
-	FinishAs     string  `json:"finish_as"`
-	CreateTime   string  `json:"create_time"`
-	UpdateTime   string  `json:"update_time"`
-	CreateTimeMs float64 `json:"create_time_ms"`
-	UpdateTimeMs float64 `json:"update_time_ms"`
+	ID           string    `json:"id"`
+	Text         string    `json:"text"`
+	CurrencyPair string    `json:"currency_pair"`
+	Type         string    `json:"type"`
+	Account      string    `json:"account"`
+	Side         string    `json:"side"`
+	Amount       string    `json:"amount"`
+	Price        string    `json:"price"`
+	TimeInForce  string    `json:"time_in_force"`
+	Left         string    `json:"left"`
+	FilledTotal  string    `json:"filled_total"`
+	AvgDealPrice string    `json:"avg_deal_price"`
+	FillPrice    string    `json:"fill_price"`
+	Status       string    `json:"status"`
+	FinishAs     string    `json:"finish_as"`
+	CreateTime   string    `json:"create_time"`
+	UpdateTime   string    `json:"update_time"`
+	CreateTimeMs flexFloat `json:"create_time_ms"`
+	UpdateTimeMs flexFloat `json:"update_time_ms"`
+}
+
+// flexFloat decodes a JSON value that Gate sends as either a number or a quoted
+// string. REST responses use a numeric *_ms; some WS pushes quote it (and may
+// carry fractional milliseconds). Malformed values decode to 0 (tolerant: a
+// single bad timestamp must not drop the whole push).
+type flexFloat float64
+
+// UnmarshalJSON implements json.Unmarshaler for both number and string forms.
+func (f *flexFloat) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+	var s string = strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	var v float64
+	var err error
+	v, err = strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	*f = flexFloat(v)
+	return nil
 }
 
 // batchSpotOrderPayload — a single element of a batch_orders response: a spot
@@ -88,8 +113,8 @@ func orderInfoFromPayload(p *spotOrderPayload, rateLimits map[string]string) typ
 	info.TimeInForce = types.TimeInForceType(p.TimeInForce)
 	info.Status = p.Status
 	info.FinishAs = p.FinishAs
-	info.CreatedAtMs = spotEpochMs(p.CreateTimeMs, p.CreateTime)
-	info.UpdatedAtMs = spotEpochMs(p.UpdateTimeMs, p.UpdateTime)
+	info.CreatedAtMs = spotEpochMs(float64(p.CreateTimeMs), p.CreateTime)
+	info.UpdatedAtMs = spotEpochMs(float64(p.UpdateTimeMs), p.UpdateTime)
 	info.RateLimits = rateLimits
 	return info
 }
