@@ -17,8 +17,8 @@ Three-layer composition (mirrors go-okx):
 - **Internal** (`internal/*`): `auth` (HMAC-SHA512 hex signer), `rest` (transport, no-envelope Gate
   responses, error/label mapping, rate-header collection), `codec` (json-iterator + decimal helpers),
   `gateerr` (Error/ErrorKind/MapLabel/MapHTTPStatus), `gatelog` (Logger).
-- **Sections** (per Gate terminology): `futures/` (USD-M perp, settle=usdt) — NOT YET CREATED. Later:
-  `spot/`, `delivery/`, `options/`. Each gets `client.go` + `trading.go`/`account.go`/`market.go`/`stream.go` + `types/`.
+- **Sections** (per Gate terminology): `futures/` (USD-M perp, settle=usdt) and `spot/` — IMPLEMENTED.
+  Later: `delivery/`, `options/`. Each gets `client.go` + `trading.go`/`account.go`/`market.go`/`stream.go` + `types/`.
 
 ### Gate-specific facts baked in
 - REST base `https://api.gateio.ws/api/v4` (testnet `fx-api-testnet`). WS futures `wss://fx-ws.gateio.ws/v4/ws/usdt`.
@@ -56,8 +56,24 @@ Three-layer composition (mirrors go-okx):
 **v1.0 (futures MVP) COMPLETE.** Pending calibration (do when testnet keys available): live signature
 check; native `batch_amend_orders` item shape; `order_book` current/update timestamp unit; private-channel
 push field exactness (orders/positions/trades). All flagged in code comments.
-- 📋 **core integration** (separate branch `gate-connector` off `qa`): `gate_futures` connector
-  (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration). Agree plan first.
+- ✅ **v2.0 — `spot/` section** (full parity, SDK only). Branch `v2.0-spot`. Reuses the entire
+  root/internal layer. Root `Spot()`/`RegisterSpotFactory`; config `WS.SpotURL`
+  (`wss://api.gateio.ws/ws/v4/`, no testnet — Gate spot has none; REST host shared). Spot-specific
+  types (currency_pairs spec with amount_precision/precision; order-book `[price,amount]` base levels;
+  ticker w/ bid/ask, no mark/funding; candle column order t,quote_vol,c,h,l,o,base_vol,closed;
+  balances not positions). Trading: create/batch/amend(**PATCH**)/cancel/cancel-all/cancel-batch
+  (`[{currency_pair,id}]`)/countdown/get + ID-mapping; explicit side/type, amount in base,
+  **market BUY amount = quote**, market omits price + needs ioc/fok. Account: GetBalances/GetBalance.
+  Market: currency pairs/order book/candles/tickers. Stream: book_ticker/tickers/trades (public) +
+  orders/usertrades/balances (private; payload `[currency_pair]`/`!all`, no user-id). `flexFloat`
+  tolerates number-or-string `*_ms`. Contract+validation+WS(-race) tests green; `examples/spot`.
+  Incremental order-book WS deferred (same as futures). Live spot calibration PENDING (Gate spot
+  testnet does not exist; validate against prod with prod keys). Next: tag `v2.1.0`, then `gate_spot`
+  core connector.
+- 📋 **core integration** (branch `gate-connector` off `qa`): `gate_futures` connector DONE
+  (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration,
+  runtime wiring, header-driven rate-limiter). `gate_spot` connector is the next core step (after the
+  spot SDK is tagged). Agree plan first.
 
 ### v1.0 scope decisions (approved)
 - Trading transport: **REST-only** (WS order entry deferred).

@@ -8,8 +8,9 @@ for one exchange and leaves cross-exchange unification to the caller (a trading 
 Its public surface mirrors the sibling SDKs `go-okx` and `go-bybit`, so a desk
 connector can wrap it with minimal glue.
 
-> **Status — v1.0:** USD-M perpetual **Futures** (settle = `usdt`). Spot and the
-> remaining sections land in later versions. See `docs/` for the full spec.
+> **Status:** USD-M perpetual **Futures** (settle = `usdt`, v1.0) and **Spot**
+> (v2.0) are implemented. The remaining sections land in later versions. See
+> `docs/` for the full spec.
 
 ## Install
 
@@ -26,11 +27,16 @@ Three layers, composed so each trading section stays independent and testable:
 
 ```
 gate.Client                       root: shared signer, REST transport, logger, config
-  └─ Futures() → futures.Client   one package per Gate section (named per Gate's own terms)
-       ├─ Trading()    REST: create/amend/cancel (single + batch), cancel-all, countdown
-       ├─ Account()    REST: positions, leverage, position mode, close
-       ├─ MarketData() REST: contracts, order book, candlesticks, tickers
-       └─ Stream()     WS:  book ticker (BBO), tickers, trades, orders, positions
+  ├─ Futures() → futures.Client   one package per Gate section (named per Gate's own terms)
+  │    ├─ Trading()    REST: create/amend/cancel (single + batch), cancel-all, countdown
+  │    ├─ Account()    REST: positions, leverage, position mode, close
+  │    ├─ MarketData() REST: contracts, order book, candlesticks, tickers
+  │    └─ Stream()     WS:  book ticker (BBO), tickers, trades, orders, positions
+  └─ Spot() → spot.Client         Gate Spot (currency pairs, base amounts)
+       ├─ Trading()    REST: create/amend(PATCH)/cancel (single + batch), cancel-all, countdown
+       ├─ Account()    REST: per-currency balances (available/locked)
+       ├─ MarketData() REST: currency pairs, order book, candlesticks, tickers
+       └─ Stream()     WS:  book ticker (BBO), tickers, trades, orders, usertrades, balances
 ```
 
 Sections register with the root via an `init()` factory (no import cycle); enable
@@ -111,6 +117,27 @@ func main() {
 ```
 
 A runnable version is in [`examples/basic`](examples/basic).
+
+### Spot
+
+The spot section mirrors the same shape; enable it with a blank import of
+`github.com/tonymontanov/go-gate/v2/spot` and use `client.Spot().(*spot.Client)`.
+Spot conventions differ from futures: amounts are in **base currency** (a market
+BUY's amount is the **quote** amount), `Side`/`OrderType` are explicit, amend is a
+`PATCH`, and the account exposes per-currency balances instead of positions.
+
+```go
+sp := client.Spot().(*spot.Client)
+ord, _ := sp.Trading().CreateOrder(ctx, stypes.CreateOrderRequest{
+	CurrencyPair: "BTC_USDT",
+	Side:         stypes.SideTypeBuy,
+	Amount:       decimal.RequireFromString("0.01"), // base currency
+	Price:        decimal.RequireFromString("30000"),
+	TimeInForce:  stypes.TimeInForcePOC,
+})
+```
+
+A runnable version is in [`examples/spot`](examples/spot).
 
 ## Errors
 
