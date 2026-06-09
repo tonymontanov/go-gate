@@ -33,6 +33,9 @@ import (
 	"github.com/tonymontanov/go-gate/v2/internal/codec"
 	"github.com/tonymontanov/go-gate/v2/internal/rest"
 	"github.com/tonymontanov/go-gate/v2/internal/ws"
+	"github.com/tonymontanov/go-gate/v2/orderbook"
+
+	"github.com/shopspring/decimal"
 )
 
 // Futures WS channels (USDT-settled; the "futures." prefix is Gate's).
@@ -42,7 +45,15 @@ const (
 	chanTrades     = "futures.trades"
 	chanOrders     = "futures.orders"
 	chanPositions  = "futures.positions"
+	chanOrderBook  = "futures.order_book_update"
 	pingChannel    = "futures.ping"
+)
+
+// defaultOrderBookInterval / defaultOrderBookLevel are Gate's incremental-depth
+// subscribe defaults used when the caller passes zero values.
+const (
+	defaultOrderBookInterval = "100ms"
+	defaultOrderBookLevel    = 100
 )
 
 // allContracts is Gate's wildcard for private channels covering every contract.
@@ -212,6 +223,136 @@ func (s *StreamClient) WatchTrades(ctx context.Context, contract string, handler
 				}
 				handler(pushes[i].toPublicTrade())
 			}
+		},
+	})
+}
+
+// ---- order book (incremental depth) ----------------------------------------
+
+// obLevelFutures is one level inside a futures.order_book_update push: price as
+// a string, size as an integer number of contracts (0 means remove the level).
+type obLevelFutures struct {
+	P string `json:"p"`
+	S int64  `json:"s"`
+}
+
+// orderBookUpdatePush is one futures.order_book_update event. U/u are the first
+// and last update ids covered by the event and differ only by case, so this push
+// MUST be decoded case-sensitively.
+//
+// CALIBRATION: the exact field names (t/s/U/u/b/a) and the {p,s} level shape are
+// taken from Gate's documented futures depth-update format; verify live once a
+// reachable environment is available (futures testnet was down at v1.0).
+type orderBookUpdatePush struct {
+	T      int64            `json:"t"`
+	S      string           `json:"s"`
+	FirstU int64            `json:"U"`
+	LastU  int64            `json:"u"`
+	Bids   []obLevelFutures `json:"b"`
+	Asks   []obLevelFutures `json:"a"`
+}
+
+// engineLevelsFromPush converts wire levels to engine levels (contracts → decimal).
+func engineLevelsFromPush(src []obLevelFutures) []orderbook.Level {
+	var out []orderbook.Level = make([]orderbook.Level, len(src))
+	var i int
+	for i = 0; i < len(src); i++ {
+		out[i] = orderbook.Level{Price: mustDecimal(src[i].P), Size: decimal.NewFromInt(src[i].S)}
+	}
+	return out
+}
+
+// engineLevelsFromTypes converts REST OrderBook levels (decimal contracts) to
+// engine levels — used to seed the engine from a REST snapshot.
+func engineLevelsFromTypes(src []types.OrderBookLevel) []orderbook.Level {
+	var out []orderbook.Level = make([]orderbook.Level, len(src))
+	var i int
+	for i = 0; i < len(src); i++ {
+		out[i] = orderbook.Level{Price: src[i].Price, Size: src[i].Size}
+	}
+	return out
+}
+
+// typesLevelsFromEngine converts engine levels back to public OrderBook levels.
+func typesLevelsFromEngine(src []orderbook.Level) []types.OrderBookLevel {
+	var out []types.OrderBookLevel = make([]types.OrderBookLevel, len(src))
+	var i int
+	for i = 0; i < len(src); i++ {
+		out[i] = types.OrderBookLevel{Price: src[i].Price, Size: src[i].Size}
+	}
+	return out
+}
+
+/*
+WatchOrderBook maintains a local L2 order book for a contract from the
+futures.order_book_update incremental channel, backed by REST snapshots for
+priming and resync (see the orderbook package). The handler receives the full
+top-`level` book (sizes in contracts, matching GetOrderBook) on every clean
+update; gaps trigger an automatic REST resync.
+
+interval is the Gate push frequency ("100ms"/"1000ms"; default "100ms"); level is
+the Gate depth (20/50/100; default 100) and also caps the delivered depth. The
+stream lives until ctx is cancelled.
+*/
+func (s *StreamClient) WatchOrderBook(ctx context.Context, contract string, interval string, level int, handler func(types.OrderBook), errHandler func(error)) error {
+	if interval == "" {
+		interval = defaultOrderBookInterval
+	}
+	if level <= 0 {
+		level = defaultOrderBookLevel
+	}
+	var cfg gate.Config = s.c.parent.Config()
+	var eng *orderbook.Engine = orderbook.NewEngine(contract, cfg.Orderbook.MaxDepth)
+
+	var snapFn func(context.Context) (orderbook.Snapshot, error) = func(ctx context.Context) (orderbook.Snapshot, error) {
+		var book types.OrderBook
+		var err error
+		book, err = s.c.MarketData().GetOrderBook(ctx, contract, level)
+		if err != nil {
+			return orderbook.Snapshot{}, err
+		}
+		return orderbook.Snapshot{
+			Symbol: contract,
+			Bids:   engineLevelsFromTypes(book.Bids),
+			Asks:   engineLevelsFromTypes(book.Asks),
+			ID:     book.ID,
+			TsMs:   book.UpdateMs,
+		}, nil
+	}
+	var onBook func(*orderbook.Engine) = func(e *orderbook.Engine) {
+		var ebids, easks = e.TopLevels(level)
+		handler(types.OrderBook{
+			ID:   e.LastUpdateID(),
+			Bids: typesLevelsFromEngine(ebids),
+			Asks: typesLevelsFromEngine(easks),
+		})
+	}
+	var drv *orderbook.Driver = orderbook.NewDriver(eng, snapFn, onBook, func(err error) { invokeErr(errHandler, err) })
+
+	var conn *ws.Conn = s.connection()
+	conn.Start(ctx)
+	return conn.Subscribe(&ws.Subscription{
+		Channel: chanOrderBook,
+		Payload: []string{contract, interval, strconv.Itoa(level)},
+		Reset:   func() { drv.Reset(ctx) },
+		Handler: func(event string, result []byte) {
+			var p orderBookUpdatePush
+			// U/u differ only by case → case-sensitive decode.
+			if err := codec.UnmarshalCaseSensitive(result, &p); err != nil {
+				s.logParse("order_book_update", err)
+				return
+			}
+			if p.S != "" && p.S != contract {
+				return
+			}
+			drv.PushDelta(ctx, orderbook.Delta{
+				Symbol: contract,
+				FirstU: p.FirstU,
+				LastU:  p.LastU,
+				Bids:   engineLevelsFromPush(p.Bids),
+				Asks:   engineLevelsFromPush(p.Asks),
+				TsMs:   p.T,
+			})
 		},
 	})
 }

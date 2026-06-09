@@ -31,12 +31,16 @@ gate.Client                       root: shared signer, REST transport, logger, c
   │    ├─ Trading()    REST: create/amend/cancel (single + batch), cancel-all, countdown
   │    ├─ Account()    REST: positions, leverage, position mode, close
   │    ├─ MarketData() REST: contracts, order book, candlesticks, tickers
-  │    └─ Stream()     WS:  book ticker (BBO), tickers, trades, orders, positions
+  │    └─ Stream()     WS:  book ticker (BBO), order book (L2), tickers, trades, orders, positions
   └─ Spot() → spot.Client         Gate Spot (currency pairs, base amounts)
        ├─ Trading()    REST: create/amend(PATCH)/cancel (single + batch), cancel-all, countdown
        ├─ Account()    REST: per-currency balances (available/locked)
        ├─ MarketData() REST: currency pairs, order book, candlesticks, tickers
-       └─ Stream()     WS:  book ticker (BBO), tickers, trades, orders, usertrades, balances
+       └─ Stream()     WS:  book ticker (BBO), order book (L2), tickers, trades, orders, usertrades, balances
+
+A shared `orderbook/` package maintains a local L2 book per symbol from a REST
+snapshot plus the incremental `*.order_book_update` deltas (sequence-gap detection
+and automatic resync), exposed as `Stream().WatchOrderBook(...)` on both sections.
 ```
 
 Sections register with the root via an `init()` factory (no import cycle); enable

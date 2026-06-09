@@ -79,6 +79,21 @@ func main() {
 		log.Printf("watch book ticker: %v", err)
 	}
 
+	// --- public: maintained L2 order book (REST snapshot + incremental deltas) ---
+	// The handler receives the full top-N book (sizes in contracts) on each clean
+	// update; gaps are resynced automatically from REST.
+	err = fut.Stream().WatchOrderBook(ctx, contract, "100ms", 20, func(ob ftypes.OrderBook) {
+		if len(ob.Bids) > 0 && len(ob.Asks) > 0 {
+			log.Printf("BOOK %s (id=%d): bid %s x %s | ask %s x %s",
+				contract, ob.ID, ob.Bids[0].Price, ob.Bids[0].Size, ob.Asks[0].Price, ob.Asks[0].Size)
+		}
+	}, func(e error) {
+		log.Printf("order book error: %v", e)
+	})
+	if err != nil {
+		log.Printf("watch order book: %v", err)
+	}
+
 	// --- private: place + cancel a post-only order (only with credentials) ---
 	if os.Getenv("GATE_API_KEY") != "" && os.Getenv("GATE_API_SECRET") != "" {
 		var info ftypes.OrderInfo

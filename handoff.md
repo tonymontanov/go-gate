@@ -67,17 +67,34 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   Market: currency pairs/order book/candles/tickers. Stream: book_ticker/tickers/trades (public) +
   orders/usertrades/balances (private; payload `[currency_pair]`/`!all`, no user-id). `flexFloat`
   tolerates number-or-string `*_ms`. Contract+validation+WS(-race) tests green; `examples/spot`.
-  Incremental order-book WS deferred (same as futures). Live spot calibration PENDING (Gate spot
-  testnet does not exist; validate against prod with prod keys). Next: tag `v2.1.0`, then `gate_spot`
-  core connector.
+  Live spot calibration PENDING (Gate spot testnet does not exist; validate against prod with prod
+  keys). Published: tag `v2.1.0`.
+- ✅ **v2.5 — incremental order-book engine** (SDK). Branch `v2.5-orderbook` off `v2.0-spot`. New
+  shared `orderbook/` package (mirrors `go-bybit/orderbook`): `Engine` (snapshot + delta apply,
+  sorted sides, size-0 delete, top-N) + `Driver` (REST-snapshot priming, delta buffering during
+  prime, automatic resync on gap / reconnect). Gate-specific: snapshot comes from REST
+  `GetOrderBook(with_id)` (NOT over WS); each `*.order_book_update` delta carries `[U,u]` ids; gap =
+  `U > lastU+1`; stale = `u <= lastU`; first post-snapshot delta aligns when `U <= snapId+1 <= u`. No
+  CRC32 (Gate, like Bybit, has none). Config `Orderbook.MaxDepth` (default 400). Wired
+  `WatchOrderBook(ctx, symbol, interval, level, handler, errHandler)` on BOTH `futures/stream.go`
+  (`futures.order_book_update`, `{p,s}` contract levels) and `spot/stream.go`
+  (`spot.order_book_update`, `[price,amount]` base levels); handler gets full top-N `types.OrderBook`
+  per clean update. Offline engine+driver unit tests + WS/REST integration tests (-race) green;
+  examples updated. CALIBRATION: exact depth-update field names (`t/s/U/u/b/a`), level shape, and the
+  freq/level subscribe-payload syntax follow Gate docs — verify live (futures testnet was down; spot
+  has no testnet). WS order entry + native batch_amend still deferred.
 - 📋 **core integration** (branch `gate-connector` off `qa`): `gate_futures` connector DONE
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration,
-  runtime wiring, header-driven rate-limiter). `gate_spot` connector is the next core step (after the
-  spot SDK is tagged). Agree plan first.
+  runtime wiring, header-driven rate-limiter). `gate_spot` connector DONE (consumes published
+  `v2.1.0`; base-amount sizing, balance-as-position, no-op leverage/mark/index, factory/config/app
+  wiring + rate-limiter). The incremental order book is SDK-only for now: the core
+  `ExchangeConnector` has no deep-book Watch method (uses `WatchSpread` for BBO), so exposing
+  `WatchOrderBook` to core needs a core interface change — agree plan first.
 
 ### v1.0 scope decisions (approved)
-- Trading transport: **REST-only** (WS order entry deferred).
-- Orderbook: **BBO (book_ticker) + REST snapshot** only (no incremental engine in v1.0).
+- Trading transport: **REST-only** (WS order entry deferred — still deferred).
+- Orderbook: **BBO (book_ticker) + REST snapshot** in v1.0/v2.0; the incremental engine
+  (`WatchOrderBook`) landed in v2.5 (branch `v2.5-orderbook`).
 - Order size units: **contract-native** (Side + positive Size in contracts); base→contracts conversion is the connector's job.
 
 ## Code-style rules

@@ -77,6 +77,89 @@ func newStreamTestClient(t *testing.T, wsEndpoint string) *Client {
 	return NewClient(parent)
 }
 
+// newStreamTestClientREST builds a Client pointed at both a WS endpoint and a
+// REST base URL (the order-book stream primes from REST).
+func newStreamTestClientREST(t *testing.T, wsEndpoint, restBase string) *Client {
+	t.Helper()
+	var parent *gate.Client
+	var err error
+	parent, err = gate.NewClient(gate.Config{
+		REST: gate.RestConfig{BaseURL: restBase},
+		WS:   gate.WsConfig{SpotURL: wsEndpoint},
+	})
+	if err != nil {
+		t.Fatalf("gate.NewClient: %v", err)
+	}
+	return NewClient(parent)
+}
+
+// TestWatchOrderBook_PrimesAndAppliesDelta exercises the full incremental path:
+// REST snapshot prime + a buffered spot.order_book_update delta applied via the
+// engine. Spot levels are ["price","amount"] base-currency pairs.
+func TestWatchOrderBook_PrimesAndAppliesDelta(t *testing.T) {
+	var restSrv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":1000,"current":1700000000500,"update":1700000000400,` +
+			`"asks":[["101","1"],["102","2"]],"bids":[["100","1"],["99","2"]]}`))
+	}))
+	defer restSrv.Close()
+
+	var subCh chan string = make(chan string, 1)
+	var push string = `{"time":1700000000,"channel":"spot.order_book_update","event":"update",` +
+		`"result":{"t":1700000000600,"s":"BTC_USDT","U":1001,"u":1001,` +
+		`"b":[["100","5"]],"a":[["101","0"]]}}`
+	var wsSrv *httptest.Server = wsTestServer(subCh, push)
+	defer wsSrv.Close()
+
+	var sp *Client = newStreamTestClientREST(t, wsURL(wsSrv.URL), restSrv.URL)
+	defer func() { _ = sp.Stream().Close() }()
+
+	var ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+
+	var got chan types.OrderBook = make(chan types.OrderBook, 4)
+	var err error
+	err = sp.Stream().WatchOrderBook(ctx, "BTC_USDT", "100ms", 10, func(ob types.OrderBook) {
+		select {
+		case got <- ob:
+		default:
+		}
+	}, func(error) {})
+	if err != nil {
+		t.Fatalf("WatchOrderBook: %v", err)
+	}
+
+	select {
+	case sub := <-subCh:
+		if !strings.Contains(sub, `"channel":"spot.order_book_update"`) ||
+			!strings.Contains(sub, `"BTC_USDT"`) || !strings.Contains(sub, `"100ms"`) {
+			t.Fatalf("unexpected subscribe message: %s", sub)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("server did not receive subscribe")
+	}
+
+	// Book delivered progressively: the snapshot-only book (id=1000) may arrive
+	// before the post-delta book (id=1001) depending on REST/WS ordering.
+	var deadline = time.After(3 * time.Second)
+	for {
+		select {
+		case ob := <-got:
+			if ob.ID != 1001 {
+				continue // snapshot-only book; keep waiting
+			}
+			if len(ob.Bids) == 0 || !ob.Bids[0].Price.Equal(mustDec("100")) || !ob.Bids[0].Amount.Equal(mustDec("5")) {
+				t.Fatalf("top bid = %+v, want 100@5", ob.Bids)
+			}
+			if len(ob.Asks) == 0 || !ob.Asks[0].Price.Equal(mustDec("102")) {
+				t.Fatalf("best ask = %+v, want 102 (101 deleted)", ob.Asks)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("post-delta order book (id=1001) not delivered")
+		}
+	}
+}
+
 func TestWatchBookTicker_DispatchAndCaseSensitiveDecode(t *testing.T) {
 	var subCh chan string = make(chan string, 1)
 	var push string = `{"time":1700000000,"channel":"spot.book_ticker","event":"update",` +

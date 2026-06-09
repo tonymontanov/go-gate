@@ -65,6 +65,9 @@ type Config struct {
 	REST RestConfig
 	// WS — WebSocket transport settings. Empty fields fall back to DefaultConfig().
 	WS WsConfig
+	// Orderbook — local order-book engine settings (used by the WatchOrderBook
+	// streams). Empty fields fall back to DefaultConfig().
+	Orderbook OrderbookConfig
 
 	// Logger — optional logger. If nil, NoopLogger() is used.
 	Logger Logger
@@ -137,6 +140,14 @@ type WsConfig struct {
 	WriteBufferSize int
 }
 
+// OrderbookConfig — local order-book engine settings. Consumed by the
+// WatchOrderBook streams of each section (futures, spot).
+type OrderbookConfig struct {
+	// MaxDepth — maximum number of price levels kept per side in the local book.
+	// Incoming deltas beyond this depth are trimmed. Default: 400.
+	MaxDepth int
+}
+
 // DefaultConfig returns a Config with production endpoints and sensible defaults.
 func DefaultConfig() Config {
 	return Config{
@@ -160,6 +171,9 @@ func DefaultConfig() Config {
 			ReconnectJitter:         0.2,
 			ReadBufferSize:          64 * 1024,
 			WriteBufferSize:         16 * 1024,
+		},
+		Orderbook: OrderbookConfig{
+			MaxDepth: 400,
 		},
 		Logger:    NoopLogger(),
 		UserAgent: "go-gate/v2",
@@ -234,6 +248,10 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WS.WriteBufferSize == 0 {
 		c.WS.WriteBufferSize = def.WS.WriteBufferSize
+	}
+
+	if c.Orderbook.MaxDepth == 0 {
+		c.Orderbook.MaxDepth = def.Orderbook.MaxDepth
 	}
 
 	if c.Logger == nil {

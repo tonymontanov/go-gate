@@ -78,6 +78,94 @@ func newStreamTestClient(t *testing.T, wsEndpoint string) *Client {
 	return NewClient(parent)
 }
 
+// newStreamTestClientREST builds a Client pointed at both a WS endpoint and a
+// REST base URL (the order-book stream primes from REST).
+func newStreamTestClientREST(t *testing.T, wsEndpoint, restBase string) *Client {
+	t.Helper()
+	var parent *gate.Client
+	var err error
+	parent, err = gate.NewClient(gate.Config{
+		Settle: "usdt",
+		REST:   gate.RestConfig{BaseURL: restBase},
+		WS:     gate.WsConfig{FuturesURL: wsEndpoint},
+	})
+	if err != nil {
+		t.Fatalf("gate.NewClient: %v", err)
+	}
+	return NewClient(parent)
+}
+
+// TestWatchOrderBook_PrimesAndAppliesDelta exercises the full incremental path:
+// REST snapshot prime + a buffered order_book_update delta applied via the engine.
+func TestWatchOrderBook_PrimesAndAppliesDelta(t *testing.T) {
+	// REST snapshot: id=100, two levels per side (sizes in contracts).
+	var restSrv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":100,"current":1700000000.5,"update":1700000000.4,` +
+			`"asks":[{"p":"30001","s":5},{"p":"30002","s":7}],` +
+			`"bids":[{"p":"30000","s":3},{"p":"29999","s":9}]}`))
+	}))
+	defer restSrv.Close()
+
+	// WS delta: U=u=101 — update top bid to 50, delete best ask (s:0).
+	var subCh chan string = make(chan string, 1)
+	var push string = `{"time":1700000000,"channel":"futures.order_book_update","event":"update",` +
+		`"result":{"t":1700000000600,"s":"BTC_USDT","U":101,"u":101,` +
+		`"b":[{"p":"30000","s":50}],"a":[{"p":"30001","s":0}]}}`
+	var wsSrv *httptest.Server = wsTestServer(subCh, push)
+	defer wsSrv.Close()
+
+	var fut *Client = newStreamTestClientREST(t, wsURL(wsSrv.URL), restSrv.URL)
+	defer func() { _ = fut.Stream().Close() }()
+
+	var ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+
+	var got chan types.OrderBook = make(chan types.OrderBook, 4)
+	var err error
+	err = fut.Stream().WatchOrderBook(ctx, "BTC_USDT", "100ms", 10, func(ob types.OrderBook) {
+		select {
+		case got <- ob:
+		default:
+		}
+	}, func(error) {})
+	if err != nil {
+		t.Fatalf("WatchOrderBook: %v", err)
+	}
+
+	// Subscribe format: channel + [contract, interval, level].
+	select {
+	case sub := <-subCh:
+		if !strings.Contains(sub, `"channel":"futures.order_book_update"`) ||
+			!strings.Contains(sub, `"BTC_USDT"`) || !strings.Contains(sub, `"100ms"`) {
+			t.Fatalf("unexpected subscribe message: %s", sub)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("server did not receive subscribe")
+	}
+
+	// The book is delivered progressively: depending on whether the REST snapshot
+	// or the WS delta lands first, the handler may receive the snapshot-only book
+	// (id=100) before the post-delta book (id=101). Wait for the delta-applied one.
+	var deadline = time.After(3 * time.Second)
+	for {
+		select {
+		case ob := <-got:
+			if ob.ID != 101 {
+				continue // snapshot-only book; keep waiting for the delta-applied one
+			}
+			if len(ob.Bids) == 0 || !ob.Bids[0].Price.Equal(mustDec("30000")) || !ob.Bids[0].Size.Equal(mustDec("50")) {
+				t.Fatalf("top bid = %+v, want 30000@50", ob.Bids)
+			}
+			if len(ob.Asks) == 0 || !ob.Asks[0].Price.Equal(mustDec("30002")) {
+				t.Fatalf("best ask = %+v, want 30002 (30001 deleted)", ob.Asks)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("post-delta order book (id=101) not delivered")
+		}
+	}
+}
+
 func TestWatchBookTicker_DispatchAndCaseSensitiveDecode(t *testing.T) {
 	var subCh chan string = make(chan string, 1)
 	var push string = `{"time":1700000000,"channel":"futures.book_ticker","event":"update",` +
