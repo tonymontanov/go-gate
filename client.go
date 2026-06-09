@@ -43,6 +43,9 @@ type Client struct {
 
 	futuresOnce sync.Once
 	futuresVal  any
+
+	spotOnce sync.Once
+	spotVal  any
 }
 
 // NewClient creates the root SDK client. cfg goes through withDefaults + validate.
@@ -151,4 +154,42 @@ func (c *Client) Futures() any {
 		c.futuresVal = futuresClientFactory(c)
 	})
 	return c.futuresVal
+}
+
+// spotClientFactory — spot client builder, registered by the spot package in
+// init() to avoid the import cycle (the spot package imports the root gate
+// package, so the root cannot import spot).
+var spotClientFactory func(c *Client) any
+
+// RegisterSpotFactory registers the spot client factory. Must be called from the
+// spot package's init(). Idempotent.
+//
+// Importing the spot package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/spot"
+func RegisterSpotFactory(f func(c *Client) any) {
+	if spotClientFactory == nil {
+		spotClientFactory = f
+	}
+}
+
+// Spot returns the spot sub-client. The return type is any because the root
+// package cannot import spot (which imports the root). The caller immediately
+// type-asserts to *spot.Client.
+//
+// Usage idiom:
+//
+//	var sp *spot.Client = client.Spot().(*spot.Client)
+//
+// Lazy: created on first access via the registered factory. If the spot package
+// is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Spot() any {
+	c.spotOnce.Do(func() {
+		if spotClientFactory == nil {
+			c.logger.Warn("gate.Client.Spot: spot factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/spot\"")
+			return
+		}
+		c.spotVal = spotClientFactory(c)
+	})
+	return c.spotVal
 }

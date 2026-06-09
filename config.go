@@ -35,6 +35,11 @@ var (
 	DefaultRestBaseURL string = "https://api.gateio.ws/api/v4"
 	// DefaultWsFuturesURL — production WS endpoint for USDT-settled futures.
 	DefaultWsFuturesURL string = "wss://fx-ws.gateio.ws/v4/ws/usdt"
+	// DefaultWsSpotURL — production WS endpoint for the spot section. Gate serves
+	// spot on a different host than futures (api.gateio.ws vs fx-ws.gateio.ws).
+	// Gate has NO public spot testnet (the testnet is futures-only), so there is
+	// no Testnet* counterpart — the spot section always uses this host.
+	DefaultWsSpotURL string = "wss://api.gateio.ws/ws/v4/"
 
 	// TestnetRestBaseURL — futures testnet REST endpoint.
 	TestnetRestBaseURL string = "https://fx-api-testnet.gateio.ws/api/v4"
@@ -108,6 +113,9 @@ type WsConfig struct {
 	// FuturesURL — USDT-settled futures WS URL. Default: DefaultWsFuturesURL
 	// (or TestnetWsFuturesURL when Config.Testnet is set).
 	FuturesURL string
+	// SpotURL — spot WS URL. Default: DefaultWsSpotURL. Gate has no spot testnet,
+	// so Config.Testnet does NOT switch this (spot always targets prod).
+	SpotURL string
 	// HandshakeTimeout — connection handshake timeout. Default: 10s.
 	HandshakeTimeout time.Duration
 	// ReadTimeout — read timeout for a single frame. Default: 35s.
@@ -142,6 +150,7 @@ func DefaultConfig() Config {
 		},
 		WS: WsConfig{
 			FuturesURL:              DefaultWsFuturesURL,
+			SpotURL:                 DefaultWsSpotURL,
 			HandshakeTimeout:        10 * time.Second,
 			ReadTimeout:             35 * time.Second,
 			WriteTimeout:            5 * time.Second,
@@ -194,6 +203,10 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WS.FuturesURL == "" {
 		c.WS.FuturesURL = defWsFutures
+	}
+	// Spot WS host has no testnet variant (Gate testnet is futures-only).
+	if c.WS.SpotURL == "" {
+		c.WS.SpotURL = def.WS.SpotURL
 	}
 	if c.WS.HandshakeTimeout == 0 {
 		c.WS.HandshakeTimeout = def.WS.HandshakeTimeout
