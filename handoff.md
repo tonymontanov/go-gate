@@ -83,6 +83,18 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   examples updated. CALIBRATION: exact depth-update field names (`t/s/U/u/b/a`), level shape, and the
   freq/level subscribe-payload syntax follow Gate docs — verify live (futures testnet was down; spot
   has no testnet). WS order entry + native batch_amend still deferred.
+- ✅ **v2.5 — `delivery/` section** (SDK only). Branch `v2.5-delivery` off `v2.5-orderbook`. Gate
+  Delivery = DATED/quarterly USD-M futures under `/delivery/{settle}/...`; contract names encode the
+  expiry (`BTC_USDT_20240329`, ASSET_SETTLE_YYYYMMDD) and settle at expiry (no funding). Structural
+  mirror of `futures/` (same internal layer + shared orderbook engine), specialized: SymbolInfo adds
+  `ExpireTimeMs`/`Cycle` and drops funding; Ticker drops funding; Account adds `GetSettlements`
+  (`/settlements`). Root `Delivery()`/`RegisterDeliveryFactory`; config `WS.DeliveryURL`
+  (default `wss://fx-ws.gateio.ws/v4/ws/delivery/usdt`, +testnet variant), reuses `Settle`. The SDK is
+  naming-agnostic — callers pass the full dated contract name. Contract/market/account/stream tests
+  (incl. settlements + dated-contract expiry parse) + `examples/delivery` green; build/vet/gofmt/-race
+  clean. CALIBRATION (untested live; delivery has no reachable env here): delivery WS host + whether
+  channels are `delivery.*` vs the reused `futures.*` namespace; exact `expire_time`/`cycle` keys +
+  units; settlement-record shape; confirm order/position bodies match futures.
 - 📋 **core integration** (branch `gate-connector` off `qa`): `gate_futures` connector DONE
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration,
   runtime wiring, header-driven rate-limiter). `gate_spot` connector DONE (consumes published

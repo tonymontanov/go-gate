@@ -40,11 +40,18 @@ var (
 	// Gate has NO public spot testnet (the testnet is futures-only), so there is
 	// no Testnet* counterpart — the spot section always uses this host.
 	DefaultWsSpotURL string = "wss://api.gateio.ws/ws/v4/"
+	// DefaultWsDeliveryURL — production WS endpoint for the delivery section
+	// (dated USDT-settled futures). Gate routes delivery to a delivery-specific
+	// socket; the channel names are shared with the futures namespace
+	// ("futures.*"). CALIBRATION: confirm host + channel prefix live.
+	DefaultWsDeliveryURL string = "wss://fx-ws.gateio.ws/v4/ws/delivery/usdt"
 
 	// TestnetRestBaseURL — futures testnet REST endpoint.
 	TestnetRestBaseURL string = "https://fx-api-testnet.gateio.ws/api/v4"
 	// TestnetWsFuturesURL — futures testnet WS endpoint (USDT-settled).
 	TestnetWsFuturesURL string = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt"
+	// TestnetWsDeliveryURL — delivery testnet WS endpoint. CALIBRATION: verify.
+	TestnetWsDeliveryURL string = "wss://fx-ws-testnet.gateio.ws/v4/ws/delivery/usdt"
 )
 
 // DefaultSettle — default settlement currency for the futures section.
@@ -119,6 +126,9 @@ type WsConfig struct {
 	// SpotURL — spot WS URL. Default: DefaultWsSpotURL. Gate has no spot testnet,
 	// so Config.Testnet does NOT switch this (spot always targets prod).
 	SpotURL string
+	// DeliveryURL — delivery (dated futures) WS URL. Default: DefaultWsDeliveryURL
+	// (or TestnetWsDeliveryURL when Config.Testnet is set).
+	DeliveryURL string
 	// HandshakeTimeout — connection handshake timeout. Default: 10s.
 	HandshakeTimeout time.Duration
 	// ReadTimeout — read timeout for a single frame. Default: 35s.
@@ -162,6 +172,7 @@ func DefaultConfig() Config {
 		WS: WsConfig{
 			FuturesURL:              DefaultWsFuturesURL,
 			SpotURL:                 DefaultWsSpotURL,
+			DeliveryURL:             DefaultWsDeliveryURL,
 			HandshakeTimeout:        10 * time.Second,
 			ReadTimeout:             35 * time.Second,
 			WriteTimeout:            5 * time.Second,
@@ -221,6 +232,14 @@ func (c Config) withDefaults() Config {
 	// Spot WS host has no testnet variant (Gate testnet is futures-only).
 	if c.WS.SpotURL == "" {
 		c.WS.SpotURL = def.WS.SpotURL
+	}
+	// Delivery WS endpoint: testnet swaps the default unless the user set one.
+	var defWsDelivery string = def.WS.DeliveryURL
+	if c.Testnet {
+		defWsDelivery = TestnetWsDeliveryURL
+	}
+	if c.WS.DeliveryURL == "" {
+		c.WS.DeliveryURL = defWsDelivery
 	}
 	if c.WS.HandshakeTimeout == 0 {
 		c.WS.HandshakeTimeout = def.WS.HandshakeTimeout

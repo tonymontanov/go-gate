@@ -46,6 +46,9 @@ type Client struct {
 
 	spotOnce sync.Once
 	spotVal  any
+
+	deliveryOnce sync.Once
+	deliveryVal  any
 }
 
 // NewClient creates the root SDK client. cfg goes through withDefaults + validate.
@@ -192,4 +195,42 @@ func (c *Client) Spot() any {
 		c.spotVal = spotClientFactory(c)
 	})
 	return c.spotVal
+}
+
+// deliveryClientFactory is set by the delivery package's init() to avoid the
+// import cycle (the delivery package imports the root gate package, so the root
+// cannot import delivery).
+var deliveryClientFactory func(c *Client) any
+
+// RegisterDeliveryFactory registers the delivery client factory. Must be called
+// from the delivery package's init(). Idempotent.
+//
+// Importing the delivery package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/delivery"
+func RegisterDeliveryFactory(f func(c *Client) any) {
+	if deliveryClientFactory == nil {
+		deliveryClientFactory = f
+	}
+}
+
+// Delivery returns the delivery sub-client (dated/quarterly futures). The return
+// type is any because the root package cannot import delivery (which imports the
+// root). The caller immediately type-asserts to *delivery.Client.
+//
+// Usage idiom:
+//
+//	var d *delivery.Client = client.Delivery().(*delivery.Client)
+//
+// Lazy: created on first access via the registered factory. If the delivery
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Delivery() any {
+	c.deliveryOnce.Do(func() {
+		if deliveryClientFactory == nil {
+			c.logger.Warn("gate.Client.Delivery: delivery factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/delivery\"")
+			return
+		}
+		c.deliveryVal = deliveryClientFactory(c)
+	})
+	return c.deliveryVal
 }
