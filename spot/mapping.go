@@ -113,6 +113,20 @@ func orderInfoFromPayload(p *spotOrderPayload, rateLimits map[string]string) typ
 	info.TimeInForce = types.TimeInForceType(p.TimeInForce)
 	info.Status = p.Status
 	info.FinishAs = p.FinishAs
+	// The spot WS order push carries NO "status" field — it signals lifecycle via
+	// "event" (put/update/finish) + "finish_as" (open/filled/cancelled/...).
+	// Calibrated live (2026-06-12): derive Status from finish_as when status is
+	// absent so consumers get a uniform terminal signal from both REST and WS.
+	if info.Status == "" && p.FinishAs != "" {
+		switch p.FinishAs {
+		case "open":
+			info.Status = types.OrderStatusOpen
+		case "filled":
+			info.Status = types.OrderStatusClosed
+		default: // cancelled / ioc / stp / liquidated / ...
+			info.Status = types.OrderStatusCancelled
+		}
+	}
 	info.CreatedAtMs = spotEpochMs(float64(p.CreateTimeMs), p.CreateTime)
 	info.UpdatedAtMs = spotEpochMs(float64(p.UpdateTimeMs), p.UpdateTime)
 	info.RateLimits = rateLimits
