@@ -293,7 +293,13 @@ func runPublic(ctx context.Context, client *gate.Client, section, contract strin
 	defer func() { _ = conn.Close() }()
 	var prefix = section // "futures" or "spot"
 	rawWatch(conn, prefix+".book_ticker", []string{contract}, false, 3)
-	rawWatch(conn, prefix+".order_book_update", []string{contract, "100ms", "20"}, false, 3)
+	// order_book_update payload differs: futures = [contract, interval, level];
+	// spot = [pair, interval] (calibrated live — spot rejects a 3-element payload).
+	var obPayload = []string{contract, "100ms", "20"}
+	if section == "spot" {
+		obPayload = []string{contract, "100ms"}
+	}
+	rawWatch(conn, prefix+".order_book_update", obPayload, false, 3)
 	rawWatch(conn, prefix+".tickers", []string{contract}, false, 2)
 	rawWatch(conn, prefix+".trades", []string{contract}, false, 3)
 	sleep(ctx, time.Duration(wsSeconds)*time.Second)
