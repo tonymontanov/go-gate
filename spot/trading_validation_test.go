@@ -123,3 +123,34 @@ func TestNormalizeClientID(t *testing.T) {
 		t.Fatal("expected error for invalid chars")
 	}
 }
+
+// TestOrderInfoFromPayload_WSDerivesTerminalStatus — the spot WS order push has
+// no "status" field; it signals lifecycle via "finish_as". orderInfoFromPayload
+// must derive a usable terminal Status from finish_as when status is absent
+// (calibrated live 2026-06-12), so terminal detection works for WS pushes too.
+func TestOrderInfoFromPayload_WSDerivesTerminalStatus(t *testing.T) {
+	type tc struct {
+		finishAs   string
+		wantStatus string
+	}
+	var cases = []tc{
+		{"open", types.OrderStatusOpen},
+		{"filled", types.OrderStatusClosed},
+		{"cancelled", types.OrderStatusCancelled},
+		{"ioc", types.OrderStatusCancelled},
+	}
+	var i int
+	for i = 0; i < len(cases); i++ {
+		// WS-shaped payload: status empty, finish_as set.
+		var p = spotOrderPayload{CurrencyPair: "BTC_USDT", FinishAs: cases[i].finishAs}
+		var info = orderInfoFromPayload(&p, nil)
+		if string(info.Status) != cases[i].wantStatus {
+			t.Errorf("finish_as=%q → Status=%q, want %q", cases[i].finishAs, info.Status, cases[i].wantStatus)
+		}
+	}
+	// REST-shaped payload keeps its explicit status (no override).
+	var p = spotOrderPayload{CurrencyPair: "BTC_USDT", Status: types.OrderStatusOpen, FinishAs: "open"}
+	if string(orderInfoFromPayload(&p, nil).Status) != types.OrderStatusOpen {
+		t.Error("explicit status must be preserved")
+	}
+}

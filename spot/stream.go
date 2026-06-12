@@ -31,7 +31,6 @@ package spot
 
 import (
 	"context"
-	"strconv"
 	"sync"
 
 	gate "github.com/tonymontanov/go-gate/v2"
@@ -321,7 +320,12 @@ func (s *StreamClient) WatchOrderBook(ctx context.Context, currencyPair string, 
 	conn.Start(ctx)
 	return conn.Subscribe(&ws.Subscription{
 		Channel: chanOrderBook,
-		Payload: []string{currencyPair, interval, strconv.Itoa(level)},
+		// Calibrated live (2026-06-12): Gate spot.order_book_update takes a
+		// 2-element payload [currency_pair, interval] — NO depth/level element
+		// (unlike futures.order_book_update's [contract, interval, level]). A
+		// 3-element payload is rejected with "subscribe error". `level` still
+		// caps the delivered depth (TopLevels) + the REST snapshot limit.
+		Payload: []string{currencyPair, interval},
 		Reset:   func() { drv.Reset(ctx) },
 		Handler: func(event string, result []byte) {
 			var p spotOrderBookUpdatePush

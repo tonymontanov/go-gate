@@ -95,6 +95,16 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   clean. CALIBRATION (untested live; delivery has no reachable env here): delivery WS host + whether
   channels are `delivery.*` vs the reused `futures.*` namespace; exact `expire_time`/`cycle` keys +
   units; settlement-record shape; confirm order/position bodies match futures.
+- ✅ **LIVE CALIBRATION — futures + spot (prod, 2026-06-12).** Verified raw-vs-parsed across public
+  REST/WS, signed reads, and the full write path (post-only place→amend→cancel; never filled). Futures
+  fully clean (signing, order_book_update `{t,s,U,u,b:[{p,s}],a}` contiguous, book_ticker `b/B/a/A`,
+  positions, PUT amend). Spot clean except three fixes that landed:
+  (1) `spot.order_book_update` subscribe payload is `[pair, interval]` (2 elements; futures stays 3);
+  (2) futures/delivery `GetPosition` on a FLAT contract returns a zero position (Gate sends
+  `POSITION_NOT_FOUND` HTTP 400, no longer propagated);
+  (3) spot `orders` WS push has no `status` — Status is derived from `finish_as` (open/filled/cancelled).
+  Native `batch_amend_orders` still deferred (`ModifyBatchOrders` loops single PUT amends — works). The
+  diagnostic harness lives on branch `calibration-harness` (`cmd/calibrate`), kept OUT of the release.
 - 📋 **core integration** (branch `gate-connector` off `qa`): `gate_futures` connector DONE
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration,
   runtime wiring, header-driven rate-limiter). `gate_spot` connector DONE (consumes published
