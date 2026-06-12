@@ -19,6 +19,7 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	gate "github.com/tonymontanov/go-gate/v2"
@@ -34,6 +35,10 @@ type AccountClient struct {
 func newAccountClient(c *Client) *AccountClient {
 	return &AccountClient{c: c}
 }
+
+// labelPositionNotFound is the Gate error label (HTTP 400) for a FLAT contract;
+// GetPosition surfaces it as a zero position rather than an error.
+const labelPositionNotFound = "POSITION_NOT_FOUND"
 
 func (a *AccountClient) positionsPath() string { return a.c.basePath() + "/positions" }
 func (a *AccountClient) positionPath(contract string) string {
@@ -130,6 +135,10 @@ func (a *AccountClient) GetPosition(ctx context.Context, contract string) (types
 		Meta:   rest.RequestMeta{Symbols: []string{contract}, Category: string(gate.RateLimitCategoryQuery)},
 	})
 	if err != nil {
+		var gerr *gate.Error
+		if errors.As(err, &gerr) && gerr.Label == labelPositionNotFound {
+			return types.PositionInfo{Contract: contract}, nil
+		}
 		return info, err
 	}
 	var p positionPayload

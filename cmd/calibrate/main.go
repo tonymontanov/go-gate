@@ -494,8 +494,15 @@ func runWriteSpot(ctx context.Context, client *gate.Client, contract string) {
 	// Price tick = 10^-PricePrecision.
 	var tick = decimal.New(1, -spec.PricePrecision)
 	var price = roundDownToTick(bestBid.Mul(decimal.NewFromFloat(0.5)), tick)
-	var amount = spec.MinBaseAmount
-	fmt.Printf("best bid=%s → post-only buy price=%s amount=%s (far below market, cannot fill)\n", bestBid, price, amount)
+	// Gate enforces a MINIMUM NOTIONAL (min_quote_amount, e.g. 3 USDT): at our far
+	// price, min_base_amount is far too small, so size by notional (×1.1 buffer),
+	// rounded UP to AmountPrecision, but at least MinBaseAmount.
+	var amount = ceilToPrecision(spec.MinQuoteAmount.Mul(decimal.NewFromFloat(1.1)).Div(price), spec.AmountPrecision)
+	if amount.LessThan(spec.MinBaseAmount) {
+		amount = spec.MinBaseAmount
+	}
+	fmt.Printf("best bid=%s → post-only buy price=%s amount=%s (~%s USDT, far below market, cannot fill)\n",
+		bestBid, price, amount, price.Mul(amount).Round(2))
 
 	// Deadman.
 	armDeadman(ctx, func(c context.Context, d time.Duration) error {
@@ -588,6 +595,12 @@ func roundDownToTick(price, tick decimal.Decimal) decimal.Decimal {
 		return price
 	}
 	return price.Div(tick).Floor().Mul(tick)
+}
+
+// ceilToPrecision rounds v UP to `prec` decimal places.
+func ceilToPrecision(v decimal.Decimal, prec int32) decimal.Decimal {
+	var scale = decimal.New(1, prec) // 10^prec
+	return v.Mul(scale).Ceil().Div(scale)
 }
 
 func nowID() string {

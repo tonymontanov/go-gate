@@ -159,6 +159,28 @@ func TestGetPosition_SignedSizeToSide(t *testing.T) {
 	}
 }
 
+// TestGetPosition_FlatReturnsZero — Gate returns POSITION_NOT_FOUND (HTTP 400)
+// for a contract with no open position; GetPosition must surface that as a zero
+// (flat) position, not an error (calibrated live 2026-06-12).
+func TestGetPosition_FlatReturnsZero(t *testing.T) {
+	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"label":"POSITION_NOT_FOUND","message":"position not found"}`)
+	}))
+	defer srv.Close()
+
+	var fut *Client = newFuturesTestClient(t, srv.URL)
+	var pos types.PositionInfo
+	var err error
+	pos, err = fut.Account().GetPosition(context.Background(), "BTC_USDT")
+	if err != nil {
+		t.Fatalf("flat position should not error, got %v", err)
+	}
+	if pos.Contract != "BTC_USDT" || !pos.Size.IsZero() || pos.Side != "" {
+		t.Fatalf("expected flat zero position, got %+v", pos)
+	}
+}
+
 func TestSetLeverage_QueryEncoding(t *testing.T) {
 	var gotPath, gotQuery, gotMethod string
 	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

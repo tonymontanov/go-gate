@@ -17,12 +17,18 @@ package futures
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	gate "github.com/tonymontanov/go-gate/v2"
 	"github.com/tonymontanov/go-gate/v2/futures/types"
 	"github.com/tonymontanov/go-gate/v2/internal/rest"
 )
+
+// labelPositionNotFound is the Gate error label returned (with HTTP 400) when an
+// account holds NO position on a contract — i.e. the position is FLAT. The SDK
+// treats this as a zero position, not an error (calibrated live 2026-06-12).
+const labelPositionNotFound = "POSITION_NOT_FOUND"
 
 // AccountClient — account/position sub-client.
 type AccountClient struct {
@@ -127,6 +133,12 @@ func (a *AccountClient) GetPosition(ctx context.Context, contract string) (types
 		Meta:   rest.RequestMeta{Symbols: []string{contract}, Category: string(gate.RateLimitCategoryQuery)},
 	})
 	if err != nil {
+		// Gate returns POSITION_NOT_FOUND (HTTP 400) when the contract is FLAT;
+		// surface that as a zero position so callers don't special-case "flat".
+		var gerr *gate.Error
+		if errors.As(err, &gerr) && gerr.Label == labelPositionNotFound {
+			return types.PositionInfo{Contract: contract}, nil
+		}
 		return info, err
 	}
 	var p positionPayload
