@@ -95,6 +95,37 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   clean. CALIBRATION (untested live; delivery has no reachable env here): delivery WS host + whether
   channels are `delivery.*` vs the reused `futures.*` namespace; exact `expire_time`/`cycle` keys +
   units; settlement-record shape; confirm order/position bodies match futures.
+- ✅ **v2.5 — `options/` section** (SDK only, does NOT touch core). Gate Options =
+  European-style crypto options written on an UNDERLYING index; contract names encode
+  underlying+expiry+strike (`BTC_USDT-20240329-50000-C`). Structural mirror of
+  `futures/`/`delivery/` (same internal layer + shared orderbook engine), with the
+  key differences: **NOT settle-scoped** — REST paths are `/options/...` (no
+  `{settle}`), `basePath()` returns `"/options"`; **NO batch endpoints** (no batch
+  create/amend/cancel); orders use the **futures signed-size model** (direction = sign
+  of int `size`, market = `price="0"`+`tif=ioc`, `text` `t-`-prefixed; amend size is
+  signed → needs `Side`). Root `Options()`/`RegisterOptionsFactory` + config
+  `WS.OptionsURL` were pre-wired; `options/client.go` `init()` registers the factory.
+  MarketData (public): GetUnderlyings, GetExpirations (`[]int64` secs → ms), GetContracts/
+  GetContract (SymbolInfo w/ underlying/expiry/strike/is_call/multiplier/greeks),
+  GetSettlements/GetSettlement, GetOrderBook(with_id), GetTickers (IV surface + greeks),
+  GetUnderlyingTicker, GetCandlesticks, GetUnderlyingCandlesticks, GetTrades. Account
+  (signed): GetAccount (single object), GetAccountBook, GetPositions, GetPosition
+  (POSITION_NOT_FOUND→flat), GetPositionClose, GetMySettlements. Trading (signed):
+  CreateOrder, ModifyOrder (PUT, signed size), CancelOrder, CancelAllOrders (native
+  DELETE `?contract=&underlying=&side=`), CountdownCancelAll, GetOrder, GetOpenOrders,
+  GetMyTrades, MMP (GetMMP/SetMMP/ResetMMP) + ClientOrderID↔OrderID mapping. Stream:
+  WatchContractTickers (`options.contract_tickers`), WatchUnderlyingPrice
+  (`options.ul_price`), WatchTrades (`options.trades`), WatchOrderBook (shared engine,
+  `options.order_book_update`); private WatchOrders/WatchPositions/WatchUserTrades
+  (`options.orders`/`.positions`/`.usertrades`, lazy user-id via GET /options/accounts).
+  `codec.FlexDecimal` on all number-or-string payload fields (contract/ticker/position/
+  account decimals + greeks: REST quotes, WS sends bare numbers). Contract/market/account/
+  validation/stream (-race) tests green + `examples/options`; build/vet/gofmt clean.
+  CALIBRATION (untested live; no reachable options env here): WS host
+  `wss://op-ws.gateio.live/v4/ws` + the `options.*` channel names and payload shapes;
+  ul_price/usertrades push field names; exact contract-spec keys (expiration_time/
+  strike_price/is_call/multiplier) + units; position_close/my_settlements/account/MMP
+  field sets. SDK-only — no core change.
 - ✅ **LIVE CALIBRATION — futures + spot (prod, 2026-06-12).** Verified raw-vs-parsed across public
   REST/WS, signed reads, and the full write path (post-only place→amend→cancel; never filled). Futures
   fully clean (signing, order_book_update `{t,s,U,u,b:[{p,s}],a}` contiguous, book_ticker `b/B/a/A`,

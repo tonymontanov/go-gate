@@ -23,8 +23,24 @@ func TestConfig_WithDefaults_Production(t *testing.T) {
 	if c.WS.FuturesURL != DefaultWsFuturesURL {
 		t.Fatalf("ws futures: got %q want %q", c.WS.FuturesURL, DefaultWsFuturesURL)
 	}
+	if c.WS.OptionsURL != DefaultWsOptionsURL {
+		t.Fatalf("ws options: got %q want %q", c.WS.OptionsURL, DefaultWsOptionsURL)
+	}
 	if c.UserAgent != "go-gate/v2" {
 		t.Fatalf("user agent: got %q", c.UserAgent)
+	}
+}
+
+func TestConfig_OptionsURL_TestnetAndExplicit(t *testing.T) {
+	// Testnet swaps the default options WS endpoint.
+	var c Config = Config{Testnet: true}.withDefaults()
+	if c.WS.OptionsURL != TestnetWsOptionsURL {
+		t.Fatalf("testnet ws options: got %q want %q", c.WS.OptionsURL, TestnetWsOptionsURL)
+	}
+	// An explicit options URL is respected even under Testnet.
+	c = Config{Testnet: true, WS: WsConfig{OptionsURL: "ws://localhost:9000/options"}}.withDefaults()
+	if c.WS.OptionsURL != "ws://localhost:9000/options" {
+		t.Fatalf("explicit options url overridden: got %q", c.WS.OptionsURL)
 	}
 }
 

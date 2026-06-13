@@ -45,6 +45,12 @@ var (
 	// socket; the channel names are shared with the futures namespace
 	// ("futures.*"). CALIBRATION: confirm host + channel prefix live.
 	DefaultWsDeliveryURL string = "wss://fx-ws.gateio.ws/v4/ws/delivery/usdt"
+	// DefaultWsOptionsURL — production WS endpoint for the options section. Gate
+	// routes options to a dedicated socket (note the ".live" host) and the
+	// channels live in the "options.*" namespace. Options is NOT settle-scoped
+	// (REST paths are "/options/...", not "/options/{settle}/...").
+	// CALIBRATION: confirm host + channel names live.
+	DefaultWsOptionsURL string = "wss://op-ws.gateio.live/v4/ws"
 
 	// TestnetRestBaseURL — futures testnet REST endpoint.
 	TestnetRestBaseURL string = "https://fx-api-testnet.gateio.ws/api/v4"
@@ -52,6 +58,8 @@ var (
 	TestnetWsFuturesURL string = "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt"
 	// TestnetWsDeliveryURL — delivery testnet WS endpoint. CALIBRATION: verify.
 	TestnetWsDeliveryURL string = "wss://fx-ws-testnet.gateio.ws/v4/ws/delivery/usdt"
+	// TestnetWsOptionsURL — options testnet WS endpoint. CALIBRATION: verify.
+	TestnetWsOptionsURL string = "wss://ws-testnet.gate.com/v4/ws/options"
 )
 
 // DefaultSettle — default settlement currency for the futures section.
@@ -129,6 +137,9 @@ type WsConfig struct {
 	// DeliveryURL — delivery (dated futures) WS URL. Default: DefaultWsDeliveryURL
 	// (or TestnetWsDeliveryURL when Config.Testnet is set).
 	DeliveryURL string
+	// OptionsURL — options WS URL. Default: DefaultWsOptionsURL (or
+	// TestnetWsOptionsURL when Config.Testnet is set).
+	OptionsURL string
 	// HandshakeTimeout — connection handshake timeout. Default: 10s.
 	HandshakeTimeout time.Duration
 	// ReadTimeout — read timeout for a single frame. Default: 35s.
@@ -173,6 +184,7 @@ func DefaultConfig() Config {
 			FuturesURL:              DefaultWsFuturesURL,
 			SpotURL:                 DefaultWsSpotURL,
 			DeliveryURL:             DefaultWsDeliveryURL,
+			OptionsURL:              DefaultWsOptionsURL,
 			HandshakeTimeout:        10 * time.Second,
 			ReadTimeout:             35 * time.Second,
 			WriteTimeout:            5 * time.Second,
@@ -240,6 +252,14 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WS.DeliveryURL == "" {
 		c.WS.DeliveryURL = defWsDelivery
+	}
+	// Options WS endpoint: testnet swaps the default unless the user set one.
+	var defWsOptions string = def.WS.OptionsURL
+	if c.Testnet {
+		defWsOptions = TestnetWsOptionsURL
+	}
+	if c.WS.OptionsURL == "" {
+		c.WS.OptionsURL = defWsOptions
 	}
 	if c.WS.HandshakeTimeout == 0 {
 		c.WS.HandshakeTimeout = def.WS.HandshakeTimeout

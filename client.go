@@ -49,6 +49,9 @@ type Client struct {
 
 	deliveryOnce sync.Once
 	deliveryVal  any
+
+	optionsOnce sync.Once
+	optionsVal  any
 }
 
 // NewClient creates the root SDK client. cfg goes through withDefaults + validate.
@@ -233,4 +236,42 @@ func (c *Client) Delivery() any {
 		c.deliveryVal = deliveryClientFactory(c)
 	})
 	return c.deliveryVal
+}
+
+// optionsClientFactory is set by the options package's init() to avoid the
+// import cycle (the options package imports the root gate package, so the root
+// cannot import options).
+var optionsClientFactory func(c *Client) any
+
+// RegisterOptionsFactory registers the options client factory. Must be called
+// from the options package's init(). Idempotent.
+//
+// Importing the options package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/options"
+func RegisterOptionsFactory(f func(c *Client) any) {
+	if optionsClientFactory == nil {
+		optionsClientFactory = f
+	}
+}
+
+// Options returns the options sub-client (European-style crypto options). The
+// return type is any because the root package cannot import options (which
+// imports the root). The caller immediately type-asserts to *options.Client.
+//
+// Usage idiom:
+//
+//	var o *options.Client = client.Options().(*options.Client)
+//
+// Lazy: created on first access via the registered factory. If the options
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Options() any {
+	c.optionsOnce.Do(func() {
+		if optionsClientFactory == nil {
+			c.logger.Warn("gate.Client.Options: options factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/options\"")
+			return
+		}
+		c.optionsVal = optionsClientFactory(c)
+	})
+	return c.optionsVal
 }
