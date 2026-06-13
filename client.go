@@ -52,6 +52,15 @@ type Client struct {
 
 	optionsOnce sync.Once
 	optionsVal  any
+
+	marginOnce sync.Once
+	marginVal  any
+
+	unifiedOnce sync.Once
+	unifiedVal  any
+
+	earnOnce sync.Once
+	earnVal  any
 }
 
 // NewClient creates the root SDK client. cfg goes through withDefaults + validate.
@@ -274,4 +283,116 @@ func (c *Client) Options() any {
 		c.optionsVal = optionsClientFactory(c)
 	})
 	return c.optionsVal
+}
+
+// marginClientFactory is set by the margin package's init() to avoid the import
+// cycle (the margin package imports the root gate package).
+var marginClientFactory func(c *Client) any
+
+// RegisterMarginFactory registers the margin client factory. Must be called from
+// the margin package's init(). Idempotent.
+//
+// Importing the margin package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/margin"
+func RegisterMarginFactory(f func(c *Client) any) {
+	if marginClientFactory == nil {
+		marginClientFactory = f
+	}
+}
+
+// Margin returns the margin sub-client (isolated + cross margin). The return
+// type is any because the root package cannot import margin (which imports the
+// root). The caller immediately type-asserts to *margin.Client.
+//
+// Usage idiom:
+//
+//	var m *margin.Client = client.Margin().(*margin.Client)
+//
+// Lazy: created on first access via the registered factory. If the margin
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Margin() any {
+	c.marginOnce.Do(func() {
+		if marginClientFactory == nil {
+			c.logger.Warn("gate.Client.Margin: margin factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/margin\"")
+			return
+		}
+		c.marginVal = marginClientFactory(c)
+	})
+	return c.marginVal
+}
+
+// unifiedClientFactory is set by the unified package's init() to avoid the import
+// cycle (the unified package imports the root gate package).
+var unifiedClientFactory func(c *Client) any
+
+// RegisterUnifiedFactory registers the unified client factory. Must be called
+// from the unified package's init(). Idempotent.
+//
+// Importing the unified package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/unified"
+func RegisterUnifiedFactory(f func(c *Client) any) {
+	if unifiedClientFactory == nil {
+		unifiedClientFactory = f
+	}
+}
+
+// Unified returns the unified-account sub-client (portfolio/cross-currency
+// margin account). The return type is any because the root package cannot import
+// unified (which imports the root). The caller immediately type-asserts to
+// *unified.Client.
+//
+// Usage idiom:
+//
+//	var u *unified.Client = client.Unified().(*unified.Client)
+//
+// Lazy: created on first access via the registered factory. If the unified
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Unified() any {
+	c.unifiedOnce.Do(func() {
+		if unifiedClientFactory == nil {
+			c.logger.Warn("gate.Client.Unified: unified factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/unified\"")
+			return
+		}
+		c.unifiedVal = unifiedClientFactory(c)
+	})
+	return c.unifiedVal
+}
+
+// earnClientFactory is set by the earn package's init() to avoid the import
+// cycle (the earn package imports the root gate package).
+var earnClientFactory func(c *Client) any
+
+// RegisterEarnFactory registers the earn client factory. Must be called from the
+// earn package's init(). Idempotent.
+//
+// Importing the earn package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/earn"
+func RegisterEarnFactory(f func(c *Client) any) {
+	if earnClientFactory == nil {
+		earnClientFactory = f
+	}
+}
+
+// Earn returns the earn sub-client (Uni lending / simple earn). The return type
+// is any because the root package cannot import earn (which imports the root).
+// The caller immediately type-asserts to *earn.Client.
+//
+// Usage idiom:
+//
+//	var e *earn.Client = client.Earn().(*earn.Client)
+//
+// Lazy: created on first access via the registered factory. If the earn package
+// is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Earn() any {
+	c.earnOnce.Do(func() {
+		if earnClientFactory == nil {
+			c.logger.Warn("gate.Client.Earn: earn factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/earn\"")
+			return
+		}
+		c.earnVal = earnClientFactory(c)
+	})
+	return c.earnVal
 }

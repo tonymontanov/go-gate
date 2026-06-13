@@ -17,8 +17,11 @@ Three-layer composition (mirrors go-okx):
 - **Internal** (`internal/*`): `auth` (HMAC-SHA512 hex signer), `rest` (transport, no-envelope Gate
   responses, error/label mapping, rate-header collection), `codec` (json-iterator + decimal helpers),
   `gateerr` (Error/ErrorKind/MapLabel/MapHTTPStatus), `gatelog` (Logger).
-- **Sections** (per Gate terminology): `futures/` (USD-M perp, settle=usdt) and `spot/` — IMPLEMENTED.
-  Later: `delivery/`, `options/`. Each gets `client.go` + `trading.go`/`account.go`/`market.go`/`stream.go` + `types/`.
+- **Sections** (per Gate terminology), all IMPLEMENTED: `futures/` (USD-M perp, settle=usdt),
+  `spot/`, `delivery/` (dated futures), `options/` (trading sections: `client.go` +
+  `trading.go`/`account.go`/`market.go`/`stream.go` + `types/`); plus REST-only account/
+  lending sections `margin/` (isolated+cross), `unified/` (portfolio-margin account),
+  `earn/` (Uni flexible lending). Each registers a factory via `Register*Factory` in `init()`.
 
 ### Gate-specific facts baked in
 - REST base `https://api.gateio.ws/api/v4` (testnet `fx-api-testnet`). WS futures `wss://fx-ws.gateio.ws/v4/ws/usdt`.
@@ -125,7 +128,35 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   `wss://op-ws.gateio.live/v4/ws` + the `options.*` channel names and payload shapes;
   ul_price/usertrades push field names; exact contract-spec keys (expiration_time/
   strike_price/is_call/multiplier) + units; position_close/my_settlements/account/MMP
-  field sets. SDK-only — no core change.
+  field sets. SDK-only — no core change. Published: tag `v2.5.0`.
+- ✅ **v2.6 — `margin/` + `unified/` + `earn/` sections** (SDK only, REST-only, do NOT
+  touch core). Three additional Gate sections, all NOT settle-scoped, each its own
+  package mirroring the section pattern (root `Margin()`/`Unified()`/`Earn()` +
+  `Register*Factory` pre-wired in `client.go`; per-section `init()` registers). No WS
+  (these are account/lending domains). `codec.FlexDecimal` on number-or-string money
+  fields; epoch-seconds→ms via per-section local helpers (no cross-section imports).
+  • **margin/** (`/margin/...` isolated + `/margin/cross/...` cross): sub-clients
+    `Isolated()` (currency_pairs, funding_book, accounts, account_book, funding_accounts,
+    loans CRUD + repayment, loan_records, auto_repay, transferable, borrowable) and
+    `Cross()` (currencies, accounts, account_book, loans, repayments, transferable,
+    borrowable). `examples/margin`.
+  • **unified/** (`/unified/...` portfolio/cross-margin account): single `unified.Client`
+    — accounts, borrowable/batch_borrowable, transferable/transferables, loans (list/
+    create borrow|repay), loan_records, interest_records, estimate_rate, history_loan_rate,
+    currencies, unified_mode (get/set PUT), risk_units, portfolio_calculator,
+    collateral_currencies, currency_discount_tiers, loan_margin_tiers, leverage config/
+    setting (get/set). `examples/unified`.
+  • **earn/** (`/earn/uni/...` flexible lending): single `earn.Client` — currencies
+    (list/get), lends (create lend|redeem POST, change PATCH, list), lend_records,
+    interests/{ccy}, interest_records, interest_status/{ccy}, chart, rate.
+    `examples/earn`.
+  httptest contract tests per section (incl. FlexDecimal number-or-string decode +
+  {label,message}→*gate.Error) green; build/vet/gofmt/-race clean. CALIBRATION (no
+  reachable env here; modeled on Gate v4 docs): exact field names/sets for margin
+  account/loan/cross bodies, unified account-wide margins + balance keys + mode
+  settings map + tier shapes, and earn lend/interest field vocab; verify live.
+  Published: tag `v2.6.0`. Remaining Gate surface NOT yet covered: flash_swap,
+  multi_collateral loan, earn fixed-term/dual, sub-account & wallet transfers.
 - ✅ **LIVE CALIBRATION — futures + spot (prod, 2026-06-12).** Verified raw-vs-parsed across public
   REST/WS, signed reads, and the full write path (post-only place→amend→cancel; never filled). Futures
   fully clean (signing, order_book_update `{t,s,U,u,b:[{p,s}],a}` contiguous, book_ticker `b/B/a/A`,
