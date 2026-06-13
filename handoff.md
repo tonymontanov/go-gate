@@ -105,6 +105,41 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   (3) spot `orders` WS push has no `status` — Status is derived from `finish_as` (open/filled/cancelled).
   Native `batch_amend_orders` still deferred (`ModifyBatchOrders` loops single PUT amends — works). The
   diagnostic harness lives on branch `calibration-harness` (`cmd/calibrate`), kept OUT of the release.
+- ✅ **LIVE BUGFIX — futures (prod, 2026-06-13).** First live run with a real
+  filled position + active re-quoting surfaced two bugs, both fixed:
+  (1) **WS positions never parsed** → inventory was not real-time. The shared
+  `positionPayload` typed its decimal fields as `string`, but the
+  `futures.positions` / `delivery.positions` WS push sends them as bare JSON
+  numbers (`cross_leverage_limit:25`, `liq_price:0.0418`) while REST quotes them.
+  Added `codec.FlexDecimal` (number-or-string → decimal, precision-preserving,
+  tolerant Zero) and switched all decimal fields of `positionPayload` in
+  `futures/account.go` + `delivery/account.go` to it. Test:
+  `TestPositionPayload_DecodesNumberAndStringForms` + `internal/codec` test.
+  (2) **futures amend always failed** with `trading.CreateOrder: Side must be buy
+  or sell`. The SDK is correct (Gate's amend `size` is signed, so `buildAmendBody`
+  needs `Side`); the **core** `gate_futures` connector built the
+  `ModifyOrderRequest` WITHOUT `Side`. Fixed in
+  `core/.../gate/futures/connector.go` (`ModifyOrder` + `ModifyBatchOrders`) by
+  passing `Side: coreSideToGate(req.Side)`. Test:
+  `TestModifyOrder_PropagatesSignedSize` (httptest-backed, asserts signed size).
+  Spot was unaffected (spot amend uses unsigned base `amount`). NOTE: spot's Gate
+  `order` rate-limit bucket is tiny (limit≈10/window) → the header-driven limiter
+  legitimately throttles batch place/amend; native batch-amend (below) reduces this.
+- ✅ **NATIVE BATCH AMEND (2026-06-13).** `ModifyBatchOrders` no longer loops single
+  amends — it now uses Gate's native endpoints, chunked to Gate's per-request caps:
+  futures `POST /futures/{settle}/batch_amend_orders` (≤10/req, item
+  `{order_id|text, size [signed], price, amend_text}`, response `[]BatchFuturesOrder`
+  reusing `batchFuturesOrderPayload`); spot `POST /spot/amend_batch_orders` (≤5/req,
+  item `{order_id, currency_pair, amount, price, amend_text}`, response `[]BatchOrder`
+  reusing `batchSpotOrderPayload`). Per-element `succeeded/label` aggregation mirrors
+  CreateBatchOrders; `RateLimitCategoryAmend` with `OrderCount=len(chunk)`. One HTTP
+  request per chunk instead of one per order — materially cheaper on Gate's per-UID
+  order limit. No core change needed (connector already calls `ModifyBatchOrders` and
+  passes `Side`). Tests: `TestModifyBatchOrders_NativeBatchAmend` (futures + spot,
+  assert path + signed/unsigned item shape + per-element mapping). Delivery still
+  loops single amends (Gate delivery has no batch-amend; out of scope, not core-wired).
+  CALIBRATION: verify live the exact futures item id field (`order_id` int vs `text`)
+  and that response is `BatchFuturesOrder` with `succeeded` (mirrors batch create).
 - 📋 **core integration** (branch `gate-connector` off `qa`): `gate_futures` connector DONE
   (`baseToContracts` via quanto_multiplier, `RateLimitEventObserver`→channel, factory registration,
   runtime wiring, header-driven rate-limiter). `gate_spot` connector DONE (consumes published

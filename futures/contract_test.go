@@ -266,6 +266,55 @@ func TestCreateBatchOrders_PartialSuccess(t *testing.T) {
 	}
 }
 
+// TestModifyBatchOrders_NativeBatchAmend pins the native batch_amend_orders path:
+// the request hits POST .../batch_amend_orders, each item carries the signed size
+// (sell → negative) plus the numeric order_id or client text, and the per-element
+// succeeded/label response maps like the batch-create path.
+func TestModifyBatchOrders_NativeBatchAmend(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `[
+			{"succeeded":true,"id":10,"contract":"BTC_USDT","size":-5,"left":-5,"price":"101","fill_price":"0","status":"open","text":"t-a"},
+			{"succeeded":false,"label":"ORDER_NOT_FOUND","detail":"gone","contract":"BTC_USDT","text":"t-b"}
+		]`)
+	}))
+	defer srv.Close()
+
+	var fut *Client = newFuturesTestClient(t, srv.URL)
+	var infos []types.OrderInfo
+	var err error
+	infos, err = fut.Trading().ModifyBatchOrders(context.Background(), []types.ModifyOrderRequest{
+		{Contract: "BTC_USDT", OrderID: "10", Side: types.SideTypeSell, NewSize: mustDec("5"), NewPrice: mustDec("101")},
+		{Contract: "BTC_USDT", ClientOrderID: "b", Side: types.SideTypeSell, NewSize: mustDec("3")},
+	})
+	if err == nil {
+		t.Fatalf("expected aggregated error for the rejected element")
+	}
+	if gotPath[len(gotPath)-len("/batch_amend_orders"):] != "/batch_amend_orders" {
+		t.Fatalf("path=%s, want suffix /batch_amend_orders", gotPath)
+	}
+
+	var items []map[string]any
+	if err = json.Unmarshal(gotBody, &items); err != nil {
+		t.Fatalf("body not a JSON array: %v (%s)", err, gotBody)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(items))
+	}
+	if items[0]["order_id"] != float64(10) || items[0]["size"] != float64(-5) {
+		t.Fatalf("item0 order_id/size: %v / %v", items[0]["order_id"], items[0]["size"])
+	}
+	if items[1]["text"] != "t-b" || items[1]["size"] != float64(-3) {
+		t.Fatalf("item1 text/size: %v / %v", items[1]["text"], items[1]["size"])
+	}
+	if len(infos) != 2 || infos[0].OrderID != "10" || infos[1].OrderID != "" {
+		t.Fatalf("infos: %+v", infos)
+	}
+}
+
 func TestCreateOrder_ErrorLabel_Surfaces(t *testing.T) {
 	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

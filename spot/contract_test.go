@@ -310,6 +310,55 @@ func TestCreateBatchOrders_PartialSuccess(t *testing.T) {
 	}
 }
 
+// TestModifyBatchOrders_NativeBatchAmend pins the native amend_batch_orders path:
+// the request hits POST /spot/amend_batch_orders, each item carries
+// order_id+currency_pair plus the new amount/price (base, unsigned), and the
+// per-element succeeded/label response maps like the batch-create path.
+func TestModifyBatchOrders_NativeBatchAmend(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `[
+			{"succeeded":true,"id":"10","currency_pair":"BTC_USDT","side":"buy","amount":"2","left":"2","price":"101","status":"open","text":"t-a"},
+			{"succeeded":false,"label":"ORDER_NOT_FOUND","message":"gone","currency_pair":"BTC_USDT","text":"t-b"}
+		]`)
+	}))
+	defer srv.Close()
+
+	var sp *Client = newSpotTestClient(t, srv.URL)
+	var infos []types.OrderInfo
+	var err error
+	infos, err = sp.Trading().ModifyBatchOrders(context.Background(), []types.ModifyOrderRequest{
+		{CurrencyPair: "BTC_USDT", OrderID: "10", NewAmount: mustDec("2"), NewPrice: mustDec("101")},
+		{CurrencyPair: "BTC_USDT", ClientOrderID: "b", NewPrice: mustDec("99")},
+	})
+	if err == nil {
+		t.Fatalf("expected aggregated error for the rejected element")
+	}
+	if gotPath != "/spot/amend_batch_orders" {
+		t.Fatalf("path=%s, want /spot/amend_batch_orders", gotPath)
+	}
+
+	var items []map[string]any
+	if err = json.Unmarshal(gotBody, &items); err != nil {
+		t.Fatalf("body not a JSON array: %v (%s)", err, gotBody)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(items))
+	}
+	if items[0]["order_id"] != "10" || items[0]["currency_pair"] != "BTC_USDT" || items[0]["amount"] != "2" {
+		t.Fatalf("item0: %v", items[0])
+	}
+	if items[1]["order_id"] != "t-b" || items[1]["price"] != "99" {
+		t.Fatalf("item1: %v", items[1])
+	}
+	if len(infos) != 2 || infos[0].OrderID != "10" || infos[1].OrderID != "" {
+		t.Fatalf("infos: %+v", infos)
+	}
+}
+
 func TestCreateOrder_ErrorLabel_Surfaces(t *testing.T) {
 	var srv *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

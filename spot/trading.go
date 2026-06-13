@@ -6,7 +6,7 @@ Trading sub-client for the Gate Spot section. Implements:
   - CreateOrder          : POST   /spot/orders
   - CreateBatchOrders    : POST   /spot/batch_orders
   - ModifyOrder          : PATCH  /spot/orders/{order_id}?currency_pair=
-  - ModifyBatchOrders    : sequential ModifyOrder
+  - ModifyBatchOrders    : POST   /spot/amend_batch_orders (native, ≤5/req)
   - CancelOrder          : DELETE /spot/orders/{order_id}?currency_pair=
   - CancelBatchOrders    : POST   /spot/cancel_batch_orders  (body: [{currency_pair,id}])
   - CancelAllOrders      : DELETE /spot/orders?currency_pair=
@@ -68,8 +68,14 @@ func newTradingClient(c *Client) *TradingClient {
 
 func (t *TradingClient) ordersPath() string      { return "/spot/orders" }
 func (t *TradingClient) batchOrdersPath() string { return "/spot/batch_orders" }
+func (t *TradingClient) batchAmendPath() string  { return "/spot/amend_batch_orders" }
 func (t *TradingClient) batchCancelPath() string { return "/spot/cancel_batch_orders" }
 func (t *TradingClient) countdownPath() string   { return "/spot/countdown_cancel_all" }
+
+// maxBatchAmend is Gate's per-request cap for POST /spot/amend_batch_orders
+// ("up to 5 orders per request"). ModifyBatchOrders chunks larger inputs.
+const maxBatchAmend = 5
+
 func (t *TradingClient) orderPath(id string) string {
 	return "/spot/orders/" + id
 }
@@ -371,8 +377,16 @@ func buildAmendBody(req types.ModifyOrderRequest) (map[string]any, error) {
 }
 
 /*
-ModifyBatchOrders amends several orders via sequential ModifyOrder calls. Returns
-an OrderInfo per request with an aggregated error for any failures.
+ModifyBatchOrders amends several orders via Gate's native
+POST /spot/amend_batch_orders. Inputs larger than Gate's per-request cap (5) are
+split into sequential chunks. The response is an array aligned with the request
+body; rejected elements (succeeded=false) carry their Gate label and contribute
+to the aggregated error, while accepted ones return a populated OrderInfo.
+Returns one OrderInfo per request, in order.
+
+A native batch amend is one HTTP request per chunk instead of one per order,
+which is materially cheaper against Gate's per-UID order rate limit (spot's order
+bucket is small) than the old sequential-amend emulation.
 */
 func (t *TradingClient) ModifyBatchOrders(ctx context.Context, reqs []types.ModifyOrderRequest) ([]types.OrderInfo, error) {
 	if len(reqs) == 0 {
@@ -380,20 +394,155 @@ func (t *TradingClient) ModifyBatchOrders(ctx context.Context, reqs []types.Modi
 	}
 	var out []types.OrderInfo = make([]types.OrderInfo, 0, len(reqs))
 	var aggErrs []error
-	var i int
-	for i = 0; i < len(reqs); i++ {
-		var info types.OrderInfo
-		var err error
-		info, err = t.ModifyOrder(ctx, reqs[i])
-		if err != nil {
-			aggErrs = append(aggErrs, fmt.Errorf("amend[%d]: %w", i, err))
+	var start int
+	for start = 0; start < len(reqs); start += maxBatchAmend {
+		var end int = start + maxBatchAmend
+		if end > len(reqs) {
+			end = len(reqs)
 		}
-		out = append(out, info)
+		var infos []types.OrderInfo
+		var err error
+		infos, err = t.modifyBatchChunk(ctx, reqs[start:end])
+		out = append(out, infos...)
+		if err != nil {
+			aggErrs = append(aggErrs, err)
+		}
 	}
 	if len(aggErrs) > 0 {
 		return out, errors.Join(aggErrs...)
 	}
 	return out, nil
+}
+
+// modifyBatchChunk sends one amend_batch_orders request for up to maxBatchAmend
+// orders and maps the per-element results.
+func (t *TradingClient) modifyBatchChunk(ctx context.Context, reqs []types.ModifyOrderRequest) ([]types.OrderInfo, error) {
+	var bodies []map[string]any = make([]map[string]any, 0, len(reqs))
+	var bodyErrs []error
+	var err error
+	var i int
+	for i = 0; i < len(reqs); i++ {
+		var b map[string]any
+		b, err = buildBatchAmendItem(reqs[i])
+		if err != nil {
+			bodyErrs = append(bodyErrs, fmt.Errorf("amend[%d]: %w", i, err))
+			continue
+		}
+		bodies = append(bodies, b)
+	}
+	if len(bodies) == 0 {
+		return placeholderAmendInfos(reqs), errors.Join(bodyErrs...)
+	}
+
+	var resp rest.Response
+	var rateLimits map[string]string
+	resp, rateLimits, err = t.c.rest().Do(ctx, rest.Options{
+		Method: "POST",
+		Path:   t.batchAmendPath(),
+		Body:   bodies,
+		Signed: true,
+		Meta: rest.RequestMeta{
+			OrderCount: len(bodies),
+			Symbols:    uniqueContractsModify(reqs),
+			Category:   string(gate.RateLimitCategoryAmend),
+		},
+	})
+	if err != nil {
+		return placeholderAmendInfos(reqs), err
+	}
+
+	var entries []batchSpotOrderPayload
+	if err = resp.UnmarshalData(&entries); err != nil {
+		return placeholderAmendInfos(reqs), gate.NewError(gate.ErrorKindUnknown, "", "trading.ModifyBatchOrders: parse", err)
+	}
+
+	var infos []types.OrderInfo = make([]types.OrderInfo, 0, len(entries))
+	var aggErrs []error = bodyErrs
+	for i = 0; i < len(entries); i++ {
+		var e batchSpotOrderPayload = entries[i]
+		if e.Succeeded != nil && !*e.Succeeded {
+			var msg string = e.Message
+			if msg == "" {
+				msg = e.Detail
+			}
+			aggErrs = append(aggErrs, &gate.Error{
+				Kind:    gate.MapLabel(e.Label, 400),
+				Label:   e.Label,
+				Message: msg,
+			})
+			infos = append(infos, types.OrderInfo{CurrencyPair: e.CurrencyPair, ClientOrderID: e.Text})
+			continue
+		}
+		infos = append(infos, orderInfoFromPayload(&e.spotOrderPayload, rateLimits))
+	}
+	if len(aggErrs) > 0 {
+		return infos, errors.Join(aggErrs...)
+	}
+	return infos, nil
+}
+
+// buildBatchAmendItem assembles one element of the amend_batch_orders body:
+// {order_id, currency_pair, amount?, price?, amend_text?}. Spot keeps side fixed;
+// amount is in base currency (no signed convention, unlike futures).
+func buildBatchAmendItem(req types.ModifyOrderRequest) (map[string]any, error) {
+	if req.CurrencyPair == "" {
+		return nil, gate.NewError(gate.ErrorKindInvalidRequest, "", "trading.ModifyBatchOrders: CurrencyPair is empty", nil)
+	}
+	if (req.OrderID == "") == (req.ClientOrderID == "") {
+		return nil, gate.NewError(gate.ErrorKindInvalidRequest, "", "trading.ModifyBatchOrders: exactly one of OrderID/ClientOrderID must be set", nil)
+	}
+	if req.NewAmount.IsZero() && req.NewPrice.IsZero() {
+		return nil, gate.NewError(gate.ErrorKindInvalidRequest, "", "trading.ModifyBatchOrders: NewAmount or NewPrice must be set", nil)
+	}
+
+	var id string = orderIDPath(req.OrderID, req.ClientOrderID)
+	if id == "" {
+		return nil, gate.NewError(gate.ErrorKindInvalidRequest, "", "trading.ModifyBatchOrders: OrderID or ClientOrderID is required", nil)
+	}
+
+	var item map[string]any = make(map[string]any, 5)
+	item["order_id"] = id
+	item["currency_pair"] = req.CurrencyPair
+	if !req.NewAmount.IsZero() {
+		item["amount"] = req.NewAmount.String()
+	}
+	if !req.NewPrice.IsZero() {
+		item["price"] = req.NewPrice.String()
+	}
+	if req.AmendText != "" {
+		item["amend_text"] = req.AmendText
+	}
+	return item, nil
+}
+
+// placeholderAmendInfos echoes request fields for the case where nothing was
+// sent (so the caller keeps positional correspondence).
+func placeholderAmendInfos(reqs []types.ModifyOrderRequest) []types.OrderInfo {
+	var out []types.OrderInfo = make([]types.OrderInfo, 0, len(reqs))
+	var i int
+	for i = 0; i < len(reqs); i++ {
+		out = append(out, types.OrderInfo{
+			CurrencyPair:  reqs[i].CurrencyPair,
+			Price:         reqs[i].NewPrice,
+			Amount:        reqs[i].NewAmount,
+			OrderID:       reqs[i].OrderID,
+			ClientOrderID: reqs[i].ClientOrderID,
+		})
+	}
+	return out
+}
+
+// uniqueContractsModify returns the sorted unique currency-pair set of an amend
+// batch, for the rate-limit observer's per-pair accounting.
+func uniqueContractsModify(reqs []types.ModifyOrderRequest) []string {
+	var set map[string]struct{} = make(map[string]struct{}, len(reqs))
+	var i int
+	for i = 0; i < len(reqs); i++ {
+		if reqs[i].CurrencyPair != "" {
+			set[reqs[i].CurrencyPair] = struct{}{}
+		}
+	}
+	return sortedKeys(set)
 }
 
 // ---- CancelOrder / CancelAllOrders / CancelBatchOrders ---------------------

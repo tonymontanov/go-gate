@@ -22,6 +22,7 @@ import (
 
 	gate "github.com/tonymontanov/go-gate/v2"
 	"github.com/tonymontanov/go-gate/v2/futures/types"
+	"github.com/tonymontanov/go-gate/v2/internal/codec"
 	"github.com/tonymontanov/go-gate/v2/internal/rest"
 )
 
@@ -49,21 +50,27 @@ func (a *AccountClient) leveragePath(contract string) string {
 func (a *AccountClient) dualModePath() string { return a.c.basePath() + "/dual_mode" }
 
 // positionPayload — Gate Position wire shape (the fields the SDK consumes).
+//
+// The decimal fields use codec.FlexDecimal because this single struct is shared
+// by the REST account client (which receives quoted strings, e.g. "25") and the
+// WebSocket futures.positions push (which sends the same fields as bare JSON
+// numbers, e.g. 25 / 0.0418). A plain string field would fail to decode the WS
+// form, silently dropping every real-time position update.
 type positionPayload struct {
-	Contract           string `json:"contract"`
-	Size               int64  `json:"size"`
-	Leverage           string `json:"leverage"`
-	CrossLeverageLimit string `json:"cross_leverage_limit"`
-	MaintenanceRate    string `json:"maintenance_rate"`
-	Value              string `json:"value"`
-	Margin             string `json:"margin"`
-	EntryPrice         string `json:"entry_price"`
-	LiqPrice           string `json:"liq_price"`
-	MarkPrice          string `json:"mark_price"`
-	UnrealisedPnl      string `json:"unrealised_pnl"`
-	RealisedPnl        string `json:"realised_pnl"`
-	Mode               string `json:"mode"`
-	UpdateTime         int64  `json:"update_time"`
+	Contract           string            `json:"contract"`
+	Size               int64             `json:"size"`
+	Leverage           codec.FlexDecimal `json:"leverage"`
+	CrossLeverageLimit codec.FlexDecimal `json:"cross_leverage_limit"`
+	MaintenanceRate    codec.FlexDecimal `json:"maintenance_rate"`
+	Value              codec.FlexDecimal `json:"value"`
+	Margin             codec.FlexDecimal `json:"margin"`
+	EntryPrice         codec.FlexDecimal `json:"entry_price"`
+	LiqPrice           codec.FlexDecimal `json:"liq_price"`
+	MarkPrice          codec.FlexDecimal `json:"mark_price"`
+	UnrealisedPnl      codec.FlexDecimal `json:"unrealised_pnl"`
+	RealisedPnl        codec.FlexDecimal `json:"realised_pnl"`
+	Mode               string            `json:"mode"`
+	UpdateTime         int64             `json:"update_time"`
 }
 
 func positionInfoFromPayload(p *positionPayload, rateLimits map[string]string) types.PositionInfo {
@@ -71,16 +78,16 @@ func positionInfoFromPayload(p *positionPayload, rateLimits map[string]string) t
 		Contract:           p.Contract,
 		Side:               sideFromSize(p.Size),
 		Size:               decimalAbsInt(p.Size),
-		EntryPrice:         mustDecimal(p.EntryPrice),
-		MarkPrice:          mustDecimal(p.MarkPrice),
-		LiqPrice:           mustDecimal(p.LiqPrice),
-		Leverage:           mustDecimal(p.Leverage),
-		CrossLeverageLimit: mustDecimal(p.CrossLeverageLimit),
-		Margin:             mustDecimal(p.Margin),
-		Value:              mustDecimal(p.Value),
-		UnrealisedPnl:      mustDecimal(p.UnrealisedPnl),
-		RealisedPnl:        mustDecimal(p.RealisedPnl),
-		MaintenanceRate:    mustDecimal(p.MaintenanceRate),
+		EntryPrice:         p.EntryPrice.Decimal,
+		MarkPrice:          p.MarkPrice.Decimal,
+		LiqPrice:           p.LiqPrice.Decimal,
+		Leverage:           p.Leverage.Decimal,
+		CrossLeverageLimit: p.CrossLeverageLimit.Decimal,
+		Margin:             p.Margin.Decimal,
+		Value:              p.Value.Decimal,
+		UnrealisedPnl:      p.UnrealisedPnl.Decimal,
+		RealisedPnl:        p.RealisedPnl.Decimal,
+		MaintenanceRate:    p.MaintenanceRate.Decimal,
 		Mode:               p.Mode,
 		UpdatedAtMs:        p.UpdateTime * 1000,
 		RateLimits:         rateLimits,

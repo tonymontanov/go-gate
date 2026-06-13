@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/tonymontanov/go-gate/v2/futures/types"
+	"github.com/tonymontanov/go-gate/v2/internal/codec"
 )
 
 func TestGetContract_ParsesSpec(t *testing.T) {
@@ -178,6 +179,50 @@ func TestGetPosition_FlatReturnsZero(t *testing.T) {
 	}
 	if pos.Contract != "BTC_USDT" || !pos.Size.IsZero() || pos.Side != "" {
 		t.Fatalf("expected flat zero position, got %+v", pos)
+	}
+}
+
+// TestPositionPayload_DecodesNumberAndStringForms guards the live bug where the
+// WebSocket futures.positions push sends decimal fields as bare JSON numbers
+// (cross_leverage_limit:25, liq_price:0.0418) while the REST payload quotes them
+// as strings. The shared positionPayload must decode BOTH via codec.FlexDecimal;
+// a plain string field silently dropped every real-time position update.
+func TestPositionPayload_DecodesNumberAndStringForms(t *testing.T) {
+	// WS push shape (mixed: leverage quoted, the rest bare numbers) — copied
+	// from a live app-gate-futures.log push that previously failed to parse.
+	var wsPush = []byte(`[{"contract":"PARTI_USDT","size":-390,"leverage":"0","mode":"single",
+		"update_id":50,"cross_leverage_limit":25,"liq_price":0.0418,"maintenance_rate":0.28,
+		"entry_price":0.0611,"mark_price":0.061,"margin":12.5,"value":23.8,
+		"unrealised_pnl":-0.7,"realised_pnl":1.2,"update_time":1700000000}]`)
+	// REST shape (all decimals quoted).
+	var restBody = []byte(`[{"contract":"PARTI_USDT","size":-390,"leverage":"0","mode":"single",
+		"cross_leverage_limit":"25","liq_price":"0.0418","maintenance_rate":"0.28",
+		"entry_price":"0.0611","mark_price":"0.061","margin":"12.5","value":"23.8",
+		"unrealised_pnl":"-0.7","realised_pnl":"1.2","update_time":1700000000}]`)
+
+	var form string
+	var raw []byte
+	for form, raw = range map[string][]byte{"ws-number": wsPush, "rest-string": restBody} {
+		var payloads []positionPayload
+		if err := codec.Unmarshal(raw, &payloads); err != nil {
+			t.Fatalf("%s: unmarshal failed: %v", form, err)
+		}
+		if len(payloads) != 1 {
+			t.Fatalf("%s: want 1 payload, got %d", form, len(payloads))
+		}
+		var pos types.PositionInfo = positionInfoFromPayload(&payloads[0], nil)
+		if pos.Side != types.SideTypeSell || !pos.Size.Equal(mustDec("390")) {
+			t.Fatalf("%s: side/size: %q / %s", form, pos.Side, pos.Size)
+		}
+		if !pos.CrossLeverageLimit.Equal(mustDec("25")) {
+			t.Fatalf("%s: cross_leverage_limit: %s", form, pos.CrossLeverageLimit)
+		}
+		if !pos.LiqPrice.Equal(mustDec("0.0418")) || !pos.MaintenanceRate.Equal(mustDec("0.28")) {
+			t.Fatalf("%s: liq/maint: %s / %s", form, pos.LiqPrice, pos.MaintenanceRate)
+		}
+		if !pos.EntryPrice.Equal(mustDec("0.0611")) || !pos.UnrealisedPnl.Equal(mustDec("-0.7")) {
+			t.Fatalf("%s: entry/upnl: %s / %s", form, pos.EntryPrice, pos.UnrealisedPnl)
+		}
 	}
 }
 
