@@ -155,8 +155,38 @@ push field exactness (orders/positions/trades). All flagged in code comments.
   reachable env here; modeled on Gate v4 docs): exact field names/sets for margin
   account/loan/cross bodies, unified account-wide margins + balance keys + mode
   settings map + tier shapes, and earn lend/interest field vocab; verify live.
-  Published: tag `v2.6.0`. Remaining Gate surface NOT yet covered: flash_swap,
-  multi_collateral loan, earn fixed-term/dual, sub-account & wallet transfers.
+  Published: tag `v2.6.0`.
+- ✅ **v2.7 — `flashswap/` + `loan/` + earn `FixedTerm()`/`Dual()` + `wallet/` +
+  `subaccount/`** (SDK only, REST-only, do NOT touch core). Final exchange-surface
+  pass; root `FlashSwap()`/`Loan()`/`Wallet()`/`SubAccount()` + `Register*Factory`
+  pre-wired in `client.go`; per-section `init()` registers. `codec.FlexDecimal` on
+  money fields; epoch→ms via per-section local helpers.
+  • **flashswap/** (`/flash_swap/...`): ListCurrencies(public), ListOrders,
+    PreviewOrder, CreateOrder (preview_id), GetOrder. `examples/flashswap`.
+  • **loan/** (multi-collateral crypto loan, `/loan/multi_collateral/...`): orders
+    (list/create/get), repay (records/repay), mortgage (records/append|redeem),
+    currency_quota, currencies(public), ltv, fixed_rate(public), current_rate(public).
+    Nested collateral_currencies[]/repay_items[]/collaterals[] bodies. `examples/loan`.
+  • **earn/** EXTENDED additively (Uni API unchanged): `FixedTerm()` (`/earn/fixed-term`
+    product/{asset}/list, user/lend list+create, pre-redeem, history) + `Dual()`
+    (`/earn/dual` investment_plan, project-recommend, orders list/create, balance,
+    order-refund-preview/refund, modify-order-reinvest).
+  • **wallet/** (`/wallet/...`): transfers (between trading accounts), sub_account_transfers
+    (list/create), sub_account_to_sub_account, total_balance, sub_account_(margin|futures|
+    cross_margin)_balances, fee, currency_chains(public), deposits, withdrawals,
+    withdraw_status. (Withdrawal CREATE intentionally omitted — dangerous/out of scope.)
+    `examples/wallet`.
+  • **subaccount/** (`/sub_accounts/...`): list/create/get sub-accounts; keys
+    list/create/get/update/delete; lock/unlock. `examples/subaccount`.
+  httptest contract tests per package (incl FlexDecimal number/string decode +
+  {label,message}→*gate.Error) green; build/vet/gofmt/-race clean. CALIBRATION (no
+  reachable env; modeled on Gate v4 docs): flashswap order status int vocab + preview
+  shape; loan order/ltv/record field names + create/repay/mortgage body shapes; earn
+  fixed-term/dual product+order field vocab; wallet transfer account-type enum +
+  balance/fee shapes; subaccount key perms shape. Published: tag `v2.7.0`.
+  EXCHANGE COVERAGE NOW COMPLETE for the desk's needs. Still intentionally out of
+  scope: actual withdrawal creation, options-WS live calibration, and dated
+  sub-products beyond those above.
 - ✅ **LIVE CALIBRATION — futures + spot (prod, 2026-06-12).** Verified raw-vs-parsed across public
   REST/WS, signed reads, and the full write path (post-only place→amend→cancel; never filled). Futures
   fully clean (signing, order_book_update `{t,s,U,u,b:[{p,s}],a}` contiguous, book_ticker `b/B/a/A`,

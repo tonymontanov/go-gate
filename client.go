@@ -61,6 +61,18 @@ type Client struct {
 
 	earnOnce sync.Once
 	earnVal  any
+
+	flashSwapOnce sync.Once
+	flashSwapVal  any
+
+	loanOnce sync.Once
+	loanVal  any
+
+	walletOnce sync.Once
+	walletVal  any
+
+	subAccountOnce sync.Once
+	subAccountVal  any
 }
 
 // NewClient creates the root SDK client. cfg goes through withDefaults + validate.
@@ -395,4 +407,153 @@ func (c *Client) Earn() any {
 		c.earnVal = earnClientFactory(c)
 	})
 	return c.earnVal
+}
+
+// flashSwapClientFactory is set by the flashswap package's init() to avoid the
+// import cycle (the flashswap package imports the root gate package).
+var flashSwapClientFactory func(c *Client) any
+
+// RegisterFlashSwapFactory registers the flashswap client factory. Must be called
+// from the flashswap package's init(). Idempotent.
+//
+// Importing the flashswap package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/flashswap"
+func RegisterFlashSwapFactory(f func(c *Client) any) {
+	if flashSwapClientFactory == nil {
+		flashSwapClientFactory = f
+	}
+}
+
+// FlashSwap returns the flash-swap sub-client (instant currency conversion). The
+// return type is any because the root package cannot import flashswap (which
+// imports the root). The caller immediately type-asserts to *flashswap.Client.
+//
+// Usage idiom:
+//
+//	var fs *flashswap.Client = client.FlashSwap().(*flashswap.Client)
+//
+// Lazy: created on first access via the registered factory. If the flashswap
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) FlashSwap() any {
+	c.flashSwapOnce.Do(func() {
+		if flashSwapClientFactory == nil {
+			c.logger.Warn("gate.Client.FlashSwap: flashswap factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/flashswap\"")
+			return
+		}
+		c.flashSwapVal = flashSwapClientFactory(c)
+	})
+	return c.flashSwapVal
+}
+
+// loanClientFactory is set by the loan package's init() to avoid the import cycle
+// (the loan package imports the root gate package).
+var loanClientFactory func(c *Client) any
+
+// RegisterLoanFactory registers the loan client factory. Must be called from the
+// loan package's init(). Idempotent.
+//
+// Importing the loan package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/loan"
+func RegisterLoanFactory(f func(c *Client) any) {
+	if loanClientFactory == nil {
+		loanClientFactory = f
+	}
+}
+
+// Loan returns the loan sub-client (multi-collateral crypto loan). The return
+// type is any because the root package cannot import loan (which imports the
+// root). The caller immediately type-asserts to *loan.Client.
+//
+// Usage idiom:
+//
+//	var l *loan.Client = client.Loan().(*loan.Client)
+//
+// Lazy: created on first access via the registered factory. If the loan package
+// is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Loan() any {
+	c.loanOnce.Do(func() {
+		if loanClientFactory == nil {
+			c.logger.Warn("gate.Client.Loan: loan factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/loan\"")
+			return
+		}
+		c.loanVal = loanClientFactory(c)
+	})
+	return c.loanVal
+}
+
+// walletClientFactory is set by the wallet package's init() to avoid the import
+// cycle (the wallet package imports the root gate package).
+var walletClientFactory func(c *Client) any
+
+// RegisterWalletFactory registers the wallet client factory. Must be called from
+// the wallet package's init(). Idempotent.
+//
+// Importing the wallet package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/wallet"
+func RegisterWalletFactory(f func(c *Client) any) {
+	if walletClientFactory == nil {
+		walletClientFactory = f
+	}
+}
+
+// Wallet returns the wallet sub-client (cross-account transfers, balances, fees).
+// The return type is any because the root package cannot import wallet (which
+// imports the root). The caller immediately type-asserts to *wallet.Client.
+//
+// Usage idiom:
+//
+//	var w *wallet.Client = client.Wallet().(*wallet.Client)
+//
+// Lazy: created on first access via the registered factory. If the wallet
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) Wallet() any {
+	c.walletOnce.Do(func() {
+		if walletClientFactory == nil {
+			c.logger.Warn("gate.Client.Wallet: wallet factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/wallet\"")
+			return
+		}
+		c.walletVal = walletClientFactory(c)
+	})
+	return c.walletVal
+}
+
+// subAccountClientFactory is set by the subaccount package's init() to avoid the
+// import cycle (the subaccount package imports the root gate package).
+var subAccountClientFactory func(c *Client) any
+
+// RegisterSubAccountFactory registers the subaccount client factory. Must be
+// called from the subaccount package's init(). Idempotent.
+//
+// Importing the subaccount package for its side effect enables the section:
+//
+//	import _ "github.com/tonymontanov/go-gate/v2/subaccount"
+func RegisterSubAccountFactory(f func(c *Client) any) {
+	if subAccountClientFactory == nil {
+		subAccountClientFactory = f
+	}
+}
+
+// SubAccount returns the sub-account management sub-client (create sub-accounts,
+// manage their API keys, lock/unlock). The return type is any because the root
+// package cannot import subaccount (which imports the root). The caller
+// immediately type-asserts to *subaccount.Client.
+//
+// Usage idiom:
+//
+//	var sa *subaccount.Client = client.SubAccount().(*subaccount.Client)
+//
+// Lazy: created on first access via the registered factory. If the subaccount
+// package is not imported (factory not registered) — returns nil and warns.
+func (c *Client) SubAccount() any {
+	c.subAccountOnce.Do(func() {
+		if subAccountClientFactory == nil {
+			c.logger.Warn("gate.Client.SubAccount: subaccount factory is not registered; import _ \"github.com/tonymontanov/go-gate/v2/subaccount\"")
+			return
+		}
+		c.subAccountVal = subAccountClientFactory(c)
+	})
+	return c.subAccountVal
 }

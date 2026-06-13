@@ -16,12 +16,23 @@ package earn
 
 import (
 	"net/url"
+	"strconv"
 
 	"github.com/shopspring/decimal"
 )
 
 // newQuery returns an empty url.Values for building REST query strings.
 func newQuery() url.Values { return url.Values{} }
+
+// idString formats a non-zero numeric id as a string ("" for 0), so zero ids do
+// not leak as "0" into the domain types. Used by the Fixed-Term and Dual
+// sub-clients whose record ids arrive as bare JSON numbers.
+func idString(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
 
 // mustDecimal parses a Gate decimal string, treating "" as zero and silently
 // falling back to zero on malformed input (a single bad field must not abort the
